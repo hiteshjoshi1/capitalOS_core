@@ -241,6 +241,29 @@ class SinceUpdateCompareBasis(BaseModel):
     older_statement_priced: int = 0
 
 
+class SinceLastVisitResponse(BaseModel):
+    """Overview's "Since your last visit" strip (#408, U3, D-112). ``first_visit``: nothing
+    stored yet (no strip). ``change`` is None when the stored figure is in another base
+    currency (``currency_changed``); ``needs_action`` is None if the Inbox couldn't be read."""
+
+    first_visit: bool
+    base_currency: str
+    seen_at: Optional[str] = None
+    net_worth_then: Optional[float] = None
+    net_worth_now: Optional[float] = None
+    change: Optional[float] = None
+    currency_changed: bool = False
+    imports_since: int = 0
+    needs_action: Optional[int] = None
+
+
+class MarkVisitResponse(BaseModel):
+    """POST /dashboard/visit: ``moved`` is False when the stored visit is under an hour old."""
+
+    moved: bool
+    seen_at: str
+
+
 class NetWorthSinceUpdateResponse(BaseModel):
     base_currency: str
     current_as_of: Optional[str] = None

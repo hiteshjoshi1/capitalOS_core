@@ -13,6 +13,7 @@ import "../App.css";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import { useBaseCurrency } from "../context/CurrencyContext";
+import SinceLastVisitStrip from "../components/SinceLastVisitStrip";
 import MonthBar from "../components/MonthBar";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
@@ -342,6 +343,8 @@ export default function WealthOverview() {
       monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       <SourceFreshnessStrip />
+      {/* #408 (U3): what changed since the last look; only on the live month. */}
+      {!isPastMonth(month) ? <SinceLastVisitStrip baseCurrency={baseCurrency} /> : null}
       {bootstrapRes.isLoading ? (
         <div className="card" role="status">Loading…</div>
       ) : null}

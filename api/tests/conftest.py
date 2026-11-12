@@ -1005,6 +1005,7 @@ def clear_db():
             "source_freshness_overrides",
             "crypto_token_visibility",
             "card_statement_dues",
+            "user_last_visit",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",

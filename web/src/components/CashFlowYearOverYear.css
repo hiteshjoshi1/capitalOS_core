@@ -1,0 +1,13 @@
+/* #409 (U15): Cash Flow vs the same month last year, and the savings-rate line. */
+.cfYoySummary {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.cfYoyHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}

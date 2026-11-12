@@ -1742,6 +1742,12 @@ a.btn {
   margin-top: 6px;
 }
 
+/* #409 (U18): a risk figure's move vs last month. */
+.riskChangeLine {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
 .riskNoData {
   margin-top: 10px;
   font-size: 12px;
@@ -4713,6 +4719,29 @@ a.btn {
   font: inherit;
 }
 
+/* #408 (U10): stablecoin filter and the stablecoin / wrapped tags. */
+.cryptoKindFilter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Buttons keep .pill's own small type (a button doesn't inherit it by default). */
+.cryptoKindFilter .pill {
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+}
+
+.cryptoKindFilter .pill[aria-pressed="true"] {
+  border-color: var(--accent, currentColor);
+  color: var(--text, inherit);
+}
+
+.cryptoKindTag {
+  font-weight: 500;
+}
+
 .cryptoHoldingHidden {
   opacity: 0.6;
 }
@@ -7275,4 +7304,11 @@ html, body {
   .coAllocViewControl .coSegmentedBtn {
     text-align: center;
   }
+}
+
+/* #410 (U28): what an upload changed, under the report counts. */
+.ingestEffect {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 600;
 }

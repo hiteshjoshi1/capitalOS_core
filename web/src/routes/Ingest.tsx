@@ -13,6 +13,7 @@ import * as fmt from "../lib/format";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { detectNote, groupAccounts } from "../lib/uploadAccount";
 import LoadError from "../components/LoadError";
+import { uploadEffectLine, type UploadEffect } from "../lib/uploadEffect";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -226,6 +227,8 @@ export default function Ingest() {
       canonical_positions_written?: number;
     };
     validation_warnings?: string[];
+    // #410 (U28): what the upload changed; absent for older reports and undated files.
+    effect?: UploadEffect | null;
     preview_transactions?: Array<Record<string, unknown>>;
     preview_positions?: Array<Record<string, unknown>>;
     error_message?: string | null;
@@ -416,6 +419,11 @@ export default function Ingest() {
                   {asOfLabel && <StatusPill tone="neutral" label={asOfLabel} />}
                 </div>
                 {canonical?.as_of_note && <div className="hint">{canonical.as_of_note}</div>}
+                {reportData.effect && (
+                  <p className="ingestEffect" data-testid="upload-effect">
+                    {uploadEffectLine(reportData.effect)}
+                  </p>
+                )}
 
                 {reportData.validation_warnings && reportData.validation_warnings.length > 0 && (
                   <div className="ingestWarningStack">

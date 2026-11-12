@@ -18,9 +18,11 @@ from .canonical_balance import AccountBalanceSnapshot
 from .source_freshness import SourceFreshnessOverride
 from .token_visibility import CryptoTokenVisibility
 from .card_due import CardStatementDue
+from .last_visit import UserLastVisit
 
 __all__ = [
     "CardStatementDue",
+    "UserLastVisit",
     "Account",
     "Platform",
     "Currency",

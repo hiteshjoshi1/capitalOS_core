@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { monthEndCloseDate, useSelectedMonth } from "../lib/selectedMonth";
+import { monthEndCloseDate, shiftMonth, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
@@ -16,6 +16,8 @@ import {
   formatLargestPosition,
   formatRiskPercent,
   resolveRiskThresholds,
+  riskChange,
+  type RiskChange,
   RISK_THRESHOLDS_RESOURCE_KEY,
   riskStateClassName,
   thresholdRule,
@@ -34,6 +36,16 @@ function barWidth(value: number, widest: number): string {
   return `${widest > 0 ? Math.max(value, 0) / widest * 100 : 0}%`;
 }
 
+/** #409 (U18): "+1.2 pts vs October 2026" under a figure; nothing when last month can't compare. */
+function RiskChangeLine({ change, label }: { change: RiskChange; label: string }) {
+  if (change.text == null) return null;
+  return (
+    <div className="muted riskChangeLine">
+      <span className={change.tone === "neutral" ? undefined : change.tone}>{change.text}</span> {label}
+    </div>
+  );
+}
+
 export default function WealthRisk() {
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency] = useBaseCurrency();
@@ -48,6 +60,11 @@ export default function WealthRisk() {
   );
   // #253: the user's thresholds (Settings → Risk thresholds); the defaults until they
   // load, and if they can't.
+  // #409 (U18): last month's figures, to show how each one moved.
+  const priorMonth = shiftMonth(month, -1);
+  const priorRes = useApiResource(resourceKey("riskSummary", priorMonth, baseCurrency), () =>
+    api.riskSummary(priorMonth, baseCurrency),
+  );
   const thresholdsRes = useApiResource(RISK_THRESHOLDS_RESOURCE_KEY, () => api.riskThresholds());
   const thresholds = resolveRiskThresholds(thresholdsRes.data);
   const summary = summaryRes.data ?? null;
@@ -87,6 +104,26 @@ export default function WealthRisk() {
   const riskPlatform = computePlatformConcentrationRisk(summary?.platform_concentration, thresholds.platformWarnPct);
   const widestPlatform = Math.max(...platformItems.map((item) => item.value), 0);
 
+  // #409 (U18): the same figures last month (its month-end), and each one's move in points.
+  const prior = priorRes.data ?? null;
+  const priorNw = prior?.view_net_worth ?? prior?.net_worth ?? null;
+  const priorTotal = priorNw?.total ?? 0;
+  const hasPrior = prior != null && priorTotal > 0;
+  const priorHoldings = prior?.top_holdings ?? [];
+  const priorCashPct = hasPrior ? ((priorNw?.cash ?? 0) / priorTotal) * 100 : null;
+  const priorLargest = computeLargestPositionRisk(priorHoldings, priorTotal, thresholds.largestPositionWarnPct);
+  const priorTopN = computeTopNConcentrationRisk(priorHoldings, priorTotal, selectedTopN, thresholds.topNWarnPct);
+  const priorPlatform = computePlatformConcentrationRisk(prior?.platform_concentration, thresholds.platformWarnPct);
+  const vsLabel = `vs ${fmt.formatMonth(priorMonth)}`;
+  const cashChange = riskChange(netWorthTotal ? cashPct : null, priorCashPct, { higherIsWorse: false, hasPrior });
+  const largestChange = riskChange(riskLargest.hasData ? riskLargest.percent : null, priorLargest.hasData ? priorLargest.percent : null, { higherIsWorse: true, hasPrior });
+  const topNChange = riskChange(riskTopN.hasData ? riskTopN.percent : null, priorTopN.hasData ? priorTopN.percent : null, { higherIsWorse: true, hasPrior });
+  const platformChange = riskChange(riskPlatform.hasData ? riskPlatform.percent : null, priorPlatform.hasData ? priorPlatform.percent : null, { higherIsWorse: true, hasPrior });
+  const largestWas =
+    hasPrior && priorLargest.hasData && riskLargest.hasData && priorLargest.symbol !== riskLargest.symbol
+      ? ` · was ${priorLargest.symbol}`
+      : "";
+
   const settingsLink = <Link to="/settings">Change in Settings</Link>;
 
   return (
@@ -107,6 +144,7 @@ export default function WealthRisk() {
               <h2>Cash buffer</h2>
               <div className="big small">{fmt.formatPercent(cashPct, { scale: "points" })}</div>
               <div className="muted">{formatMoney(netWorth?.cash)} of {formatMoney(netWorthTotal)} net worth</div>
+              <RiskChangeLine change={cashChange} label={vsLabel} />
             </div>
 
             <div className="card">
@@ -115,6 +153,7 @@ export default function WealthRisk() {
               {riskLargest.hasData ? (
                 <div className="muted">{riskLargest.assetClass} · {formatMoney(riskLargest.value)}</div>
               ) : null}
+              <RiskChangeLine change={largestChange} label={`${vsLabel}${largestWas}`} />
               <div className="muted riskThresholdRule">
                 <span className={riskStateClassName(riskLargest.state)}>{thresholdRule(thresholds.largestPositionWarnPct)}</span>
                 {" · "}
@@ -136,6 +175,7 @@ export default function WealthRisk() {
                 />
               </div>
               <div className={`big small ${riskStateClassName(riskTopN.state)}`}>{formatRiskPercent(riskTopN.percent)}</div>
+              <RiskChangeLine change={topNChange} label={vsLabel} />
               <div className="muted riskThresholdRule">
                 <span className={riskStateClassName(riskTopN.state)}>{thresholdRule(thresholds.topNWarnPct)}</span>
                 {" · "}
@@ -226,6 +266,10 @@ export default function WealthRisk() {
                 <span className={riskStateClassName(riskPlatform.state)}>{thresholdRule(thresholds.platformWarnPct)}</span>
               </div>
             </div>
+            <RiskChangeLine
+              change={platformChange}
+              label={`largest platform ${vsLabel}${riskPlatform.hasData && priorPlatform.hasData && riskPlatform.platform !== priorPlatform.platform ? ` · was ${formatPlatformLabel(priorPlatform.platform ?? "")}` : ""}`}
+            />
             {platformItems.length > 0 ? (
               <ul className="riskChartList">
                 {platformItems.map((item) => {

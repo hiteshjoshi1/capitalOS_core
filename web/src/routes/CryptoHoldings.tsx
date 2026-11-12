@@ -16,6 +16,7 @@ import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
+import StockMonthChange from "../components/StockMonthChange";
 
 
 export default function CryptoHoldings() {
@@ -25,6 +26,8 @@ export default function CryptoHoldings() {
   // #342: spam/unknown tokens (never priced, not allowlisted) and tokens the user hid.
   const [showHidden, setShowHidden] = useState<boolean>(false);
   const [savingToken, setSavingToken] = useState<string | null>(null);
+  // #408 (U10): show every token, only stablecoins, or everything but stablecoins.
+  const [kind, setKind] = useState<"all" | "stable" | "other">("all");
   const [visibilityError, setVisibilityError] = useState<string>("");
   const resource = useApiResource(resourceKey("cryptoSummary", month, baseCurrency), () =>
     api.cryptoSummary(month, baseCurrency),
@@ -44,10 +47,16 @@ export default function CryptoHoldings() {
   const listedHoldings = useMemo(() => allHoldings.filter((h) => !h.hidden), [allHoldings]);
   const hiddenTokenCount = summary?.hidden_token_count ?? allHoldings.length - listedHoldings.length;
   // Hidden tokens show only with "Show hidden" (whatever their value); the rest follow the dust rule.
-  const visibleHoldings = useMemo(
-    () => allHoldings.filter((h) => (h.hidden ? showHidden : showDust || h.value_usd >= 10)),
-    [allHoldings, showDust, showHidden],
+  const kindMatches = useCallback(
+    (h: { is_stablecoin?: boolean }) => kind === "all" || (kind === "stable") === Boolean(h.is_stablecoin),
+    [kind],
   );
+  const visibleHoldings = useMemo(
+    () => allHoldings.filter((h) => kindMatches(h) && (h.hidden ? showHidden : showDust || h.value_usd >= 10)),
+    [allHoldings, showDust, showHidden, kindMatches],
+  );
+  const stablecoinCount = useMemo(() => listedHoldings.filter((h) => h.is_stablecoin).length, [listedHoldings]);
+  const compareLabel = summary?.compare_month ? formatMonth(summary.compare_month, "medium") : "last month";
   const hiddenDustCount = listedHoldings.length - listedHoldings.filter((h) => h.value_usd >= 10).length;
 
   type Holding = CryptoSummary["top_holdings"][number];
@@ -195,6 +204,27 @@ export default function CryptoHoldings() {
             <div className="stockHoldingsHeader">
               <h2>Top holdings</h2>
               <div className="cryptoHoldingsToggles">
+                {stablecoinCount > 0 && (
+                  <div className="cryptoKindFilter" role="group" aria-label="Token kind">
+                    {(
+                      [
+                        ["all", "All"],
+                        ["stable", `Stablecoins (${stablecoinCount})`],
+                        ["other", "Not stablecoins"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className="pill"
+                        aria-pressed={kind === value}
+                        onClick={() => setKind(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <label className="pill" style={{ display: "inline-flex" }}>
                   <input
                     type="checkbox"
@@ -237,6 +267,15 @@ export default function CryptoHoldings() {
                       <span className="listRowTitle">
                         {h.symbol}
                         <span className="tag">{h.chain.toUpperCase()}</span>
+                        {h.is_stablecoin && <span className="tag cryptoKindTag">Stablecoin</span>}
+                        {h.wrapped_of && (
+                          <span
+                            className="tag cryptoKindTag"
+                            title={`${h.symbol} on ${h.chain} stands for ${h.wrapped_of}: a wrapped copy, not the coin itself`}
+                          >
+                            Wrapped {h.wrapped_of}
+                          </span>
+                        )}
                         {h.hidden && (
                           <span className="tag">{h.hidden_reason === "user_hidden" ? "Hidden" : "Unknown token"}</span>
                         )}
@@ -261,11 +300,22 @@ export default function CryptoHoldings() {
                     <div className="listRowValue">
                       {money(h.value_base)}
                       <span className="listRowValueSecondary">
-                        <Delta
-                          abs={h.value_change_base}
-                          compareValue={previousBase(h.value_base, h.value_change_base)}
-                          currency={shownCurrency}
-                        />
+                        {/* #408 (U9): price vs quantity (a buy, transfer or staking reward), as the bridge splits it. */}
+                        {h.month_change ? (
+                          <StockMonthChange
+                            change={h.month_change}
+                            currency={shownCurrency}
+                            compareLabel={compareLabel}
+                            symbol={h.symbol}
+                            unit={h.symbol}
+                          />
+                        ) : (
+                          <Delta
+                            abs={h.value_change_base}
+                            compareValue={previousBase(h.value_base, h.value_change_base)}
+                            currency={shownCurrency}
+                          />
+                        )}
                       </span>
                     </div>
                   </div>

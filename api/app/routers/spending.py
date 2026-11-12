@@ -28,6 +28,7 @@ from app.valuation.card_dues import DueState, card_due_states, due_states, load_
 from app.valuation.card_payments import card_last4s, mark_own_card_payments
 from app.valuation.own_transfers import OWN_TRANSFER_MATCH_DAYS, mark_own_transfers, owner_name_words
 from app.schemas.spending import (
+    CashFlowYearOverYearOut,
     CreditCardBalanceIn,
     CreditCardDueIn,
     CreditCardBalanceItem,
@@ -657,6 +658,76 @@ def _period_flows(rows, base_currency: str) -> tuple[float, float, dict[str, flo
             outflow_categories[category] += amount
             impacts[category] -= amount
     return inflows, outflows, outflow_categories, impacts
+
+
+def _year_over_year(
+    *,
+    month: str,
+    year_ago_rows,
+    base_currency: str,
+    income_total: float,
+    expense_total: float,
+    net: float,
+    outflow_categories: dict[str, float],
+) -> CashFlowYearOverYearOut:
+    """The month against the same month a year earlier (#409, U15, D-113), like for like: the
+    open month is days 1..today against the same days last year (clamped to that month's
+    length); any other month is whole month against whole month. ``year_ago_rows`` are
+    ``_cash_flow_rows`` for the whole of last year's month."""
+    month_start = _parse_month(month)
+    year_ago_start = _add_months(month_start, -12)
+    year_ago_days = _days_in_month(year_ago_start)
+    today = _app_today()
+    if (today.year, today.month) == (month_start.year, month_start.month):
+        basis, through_day = "month_to_date", today.day
+        prior_through = min(through_day, year_ago_days)
+    else:
+        basis, through_day = "full_month", _days_in_month(month_start)
+        prior_through = year_ago_days
+    prior_end = year_ago_start + timedelta(days=prior_through)
+    rows = [row for row in year_ago_rows if _transaction_in_month_window(row["ts"], year_ago_start, prior_end)]
+    prior_inflows, prior_outflows, prior_outflow_categories, _ = _period_flows(rows, base_currency)
+    prior_net = prior_inflows - prior_outflows
+    return CashFlowYearOverYearOut(
+        basis=basis,
+        month=month,
+        prior_year_month=_month_key(year_ago_start),
+        through_day=through_day,
+        prior_start=year_ago_start.date().isoformat(),
+        prior_end=(prior_end - timedelta(days=1)).date().isoformat(),
+        has_prior_year_data=bool(year_ago_rows),
+        inflows=income_total,
+        outflows=expense_total,
+        net=net,
+        savings_rate=(net / income_total) if income_total > 0 else None,
+        prior_inflows=prior_inflows,
+        prior_outflows=prior_outflows,
+        prior_net=prior_net,
+        prior_savings_rate=(prior_net / prior_inflows) if prior_inflows > 0 else None,
+        outflow_category_deltas=_category_delta_items(outflow_categories, prior_outflow_categories),
+    )
+
+
+def _savings_rate_trend(rows, month: str, base_currency: str) -> list[CashFlowTrendPoint]:
+    """The twelve months ending at ``month`` (#409, U15): inflows, outflows, net and savings
+    rate per month, oldest first, from ``_cash_flow_rows`` covering them."""
+    start = _add_months(_parse_month(month), -11)
+    metrics = _month_metrics(rows, base_currency)
+    points: list[CashFlowTrendPoint] = []
+    for offset in range(12):
+        key = _month_key(_add_months(start, offset))
+        values = metrics.get(key, {})
+        points.append(
+            CashFlowTrendPoint(
+                month=key,
+                inflows=float(values.get("inflows") or 0.0),
+                outflows=float(values.get("outflows") or 0.0),
+                net=float(values.get("net") or 0.0),
+                savings_rate=values.get("savings_rate"),  # type: ignore[arg-type]
+                burn_rate=values.get("burn_rate"),  # type: ignore[arg-type]
+            )
+        )
+    return points
 
 
 def _cash_flow_comparison(
@@ -1447,6 +1518,33 @@ def cash_flow_detail(
     net = income_total - expense_total
     savings_rate = (net / income_total) if income_total > 0 else None
 
+    analytics = _analytics_for_month(
+        current_rows=rows,
+        lookback_rows=lookback_rows,
+        month=month,
+        base_currency=base_currency,
+        current_user_id=current_user.id,
+        db=db,
+        income_total=income_total,
+        expense_total=expense_total,
+        net=net,
+    )
+    # #409 (U15): last year's same month and a twelve-month savings-rate line. The rows before
+    # the five-month lookback come from one more read, with the same own-transfer rules (D-85).
+    older_rows = _cash_flow_rows(db, _add_months(start, -12), lookback_start, current_user.id)
+    year_ago_key = _month_key(_add_months(start, -12))
+    current_outflow_categories = {item.label: item.amount for item in analytics.outflow_categories}
+    analytics.year_over_year = _year_over_year(
+        month=month,
+        year_ago_rows=[row for row in older_rows if _month_key(row["ts"]) == year_ago_key],
+        base_currency=base_currency,
+        income_total=income_total,
+        expense_total=expense_total,
+        net=net,
+        outflow_categories=current_outflow_categories,
+    )
+    analytics.savings_rate_trend = _savings_rate_trend(list(older_rows) + list(lookback_rows), month, base_currency)
+
     return CashFlowDetailOut(
         month=month,
         base_currency=base_currency,
@@ -1459,17 +1557,7 @@ def cash_flow_detail(
             "INCOME, EXPENSE, FEE, TAX, INTEREST, TRANSFER. Rows resolved under Transfer "
             "categories or explicit source transfer categories are excluded."
         ),
-        analytics=_analytics_for_month(
-            current_rows=rows,
-            lookback_rows=lookback_rows,
-            month=month,
-            base_currency=base_currency,
-            current_user_id=current_user.id,
-            db=db,
-            income_total=income_total,
-            expense_total=expense_total,
-            net=net,
-        ),
+        analytics=analytics,
         income=CashFlowDetailSection(
             total=income_total,
             transaction_count=len(income_transactions),

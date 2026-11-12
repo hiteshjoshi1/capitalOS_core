@@ -19,6 +19,8 @@ from app.schemas.dashboard import (
     DataHubSummaryResponse,
     GeographyExposureOut,
     HistoryGenerateStatus,
+    MarkVisitResponse,
+    SinceLastVisitResponse,
     MonthBridgeResponse,
     SpanBridgeResponse,
     NetWorthChangeResponse,
@@ -32,7 +34,7 @@ from app.schemas.dashboard import (
     WealthTimelineBackfillResponse,
     WealthTimelineResponse,
 )
-from app.services import data_hub
+from app.services import data_hub, last_visit
 from app.services.risk_thresholds import read_risk_thresholds, save_risk_thresholds
 from app.portfolio.realised import realised_summary, resolve_period
 from app.valuation import bridge, history_job, pages, span_bridge
@@ -270,6 +272,27 @@ def net_worth_since_update(
     refreshed in days, both anchors resolve to the same data and the delta is 0).
     """
     return pages.net_worth_since_update(db, current_user.id, base_currency)
+
+
+@router.get("/since-last-visit", response_model=SinceLastVisitResponse)
+def since_last_visit(
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """What changed since the user last looked at Overview (#408, U3). Read-only."""
+    return last_visit.since_last_visit(db, current_user, base_currency)
+
+
+@router.post("/visit", response_model=MarkVisitResponse)
+def mark_visit(
+    base_currency: str = Query("SGD"),
+    force: bool = Query(False, description="Dismiss: move the mark now, even within the hour"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Record an Overview visit (#408, U3): moves the stored mark if it's over an hour old, or on dismiss."""
+    return last_visit.mark_visit(db, current_user, base_currency, force=force)
 
 
 @router.get("/platform-allocation", response_model=PlatformAllocationOut)

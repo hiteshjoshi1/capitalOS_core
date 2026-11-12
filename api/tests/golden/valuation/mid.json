@@ -66,6 +66,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-02-10T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": 8046.0829,
+            "baseline_missing": false,
+            "compare_month": "2026-01",
+            "compare_value": 0.0,
+            "end_price": 150.0,
+            "end_quantity": 40.0,
+            "end_rate": 1.341,
+            "end_value": 8046.0829,
+            "fx_effect": 0.0,
+            "pct": null,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": 8046.0829,
+            "side": "new",
+            "start_price": null,
+            "start_quantity": null,
+            "start_rate": null,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-02-10T12:00:00+00:00",
           "price_change_pct": null,
           "price_change_usd": null,
@@ -84,7 +105,8 @@
           "visibility_override": null,
           "wallet_address": "SynthA111111111111111111111111111111111111",
           "wallet_id": "wallet-a-sol",
-          "wallet_label": "A sol"
+          "wallet_label": "A sol",
+          "wrapped_of": null
         },
         {
           "amount": 2.0,
@@ -95,6 +117,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-02-28T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": -508.5044,
+            "baseline_missing": false,
+            "compare_month": "2026-01",
+            "compare_value": 8018.1818,
+            "end_price": 2800.0,
+            "end_quantity": 2.0,
+            "end_rate": 1.341,
+            "end_value": 7509.6774,
+            "fx_effect": 27.9011,
+            "pct": -0.0634,
+            "price_currency": "USD",
+            "price_effect": -536.4055,
+            "quantity_effect": 0.0,
+            "side": "held",
+            "start_price": 3000.0,
+            "start_quantity": 2.0,
+            "start_rate": 1.3364,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-02-28T12:00:00+00:00",
           "price_change_pct": -0.0667,
           "price_change_usd": -200.0,
@@ -113,7 +156,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         },
         {
           "amount": 2000.0,
@@ -124,6 +168,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-02-28T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": true,
+          "month_change": {
+            "abs": 677.4822,
+            "baseline_missing": false,
+            "compare_month": "2026-01",
+            "compare_value": 2004.5455,
+            "end_price": 1.0,
+            "end_quantity": 2000.0,
+            "end_rate": 1.341,
+            "end_value": 2682.0276,
+            "fx_effect": 6.9753,
+            "pct": 0.338,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": 670.5069,
+            "side": "held",
+            "start_price": 1.0,
+            "start_quantity": 1500.0,
+            "start_rate": 1.3364,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-02-28T12:00:00+00:00",
           "price_change_pct": 0.0,
           "price_change_usd": 0.0,
@@ -142,7 +207,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         }
       ],
       "top_holdings": [
@@ -155,6 +221,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-02-10T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": 8046.0829,
+            "baseline_missing": false,
+            "compare_month": "2026-01",
+            "compare_value": 0.0,
+            "end_price": 150.0,
+            "end_quantity": 40.0,
+            "end_rate": 1.341,
+            "end_value": 8046.0829,
+            "fx_effect": 0.0,
+            "pct": null,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": 8046.0829,
+            "side": "new",
+            "start_price": null,
+            "start_quantity": null,
+            "start_rate": null,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-02-10T12:00:00+00:00",
           "price_change_pct": null,
           "price_change_usd": null,
@@ -173,7 +260,8 @@
           "visibility_override": null,
           "wallet_address": "SynthA111111111111111111111111111111111111",
           "wallet_id": "wallet-a-sol",
-          "wallet_label": "A sol"
+          "wallet_label": "A sol",
+          "wrapped_of": null
         },
         {
           "amount": 2.0,
@@ -184,6 +272,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-02-28T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": -508.5044,
+            "baseline_missing": false,
+            "compare_month": "2026-01",
+            "compare_value": 8018.1818,
+            "end_price": 2800.0,
+            "end_quantity": 2.0,
+            "end_rate": 1.341,
+            "end_value": 7509.6774,
+            "fx_effect": 27.9011,
+            "pct": -0.0634,
+            "price_currency": "USD",
+            "price_effect": -536.4055,
+            "quantity_effect": 0.0,
+            "side": "held",
+            "start_price": 3000.0,
+            "start_quantity": 2.0,
+            "start_rate": 1.3364,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-02-28T12:00:00+00:00",
           "price_change_pct": -0.0667,
           "price_change_usd": -200.0,
@@ -202,7 +311,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         },
         {
           "amount": 2000.0,
@@ -213,6 +323,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-02-28T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": true,
+          "month_change": {
+            "abs": 677.4822,
+            "baseline_missing": false,
+            "compare_month": "2026-01",
+            "compare_value": 2004.5455,
+            "end_price": 1.0,
+            "end_quantity": 2000.0,
+            "end_rate": 1.341,
+            "end_value": 2682.0276,
+            "fx_effect": 6.9753,
+            "pct": 0.338,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": 670.5069,
+            "side": "held",
+            "start_price": 1.0,
+            "start_quantity": 1500.0,
+            "start_rate": 1.3364,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-02-28T12:00:00+00:00",
           "price_change_pct": 0.0,
           "price_change_usd": 0.0,
@@ -231,7 +362,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         }
       ],
       "total_crypto_base": 18237.788,
@@ -388,6 +520,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-17T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": 2883.1797,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 7509.6774,
+            "end_price": 3100.0,
+            "end_quantity": 2.5,
+            "end_rate": 1.341,
+            "end_value": 10392.8571,
+            "fx_effect": 0.0,
+            "pct": 0.3839,
+            "price_currency": "USD",
+            "price_effect": 804.6083,
+            "quantity_effect": 2078.5714,
+            "side": "held",
+            "start_price": 2800.0,
+            "start_quantity": 2.0,
+            "start_rate": 1.341,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-17T12:00:00+00:00",
           "price_change_pct": 0.1071,
           "price_change_usd": 300.0,
@@ -406,7 +559,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         },
         {
           "amount": 40.0,
@@ -417,6 +571,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-15T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": 1072.8111,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 8046.0829,
+            "end_price": 170.0,
+            "end_quantity": 40.0,
+            "end_rate": 1.341,
+            "end_value": 9118.894,
+            "fx_effect": 0.0,
+            "pct": 0.1333,
+            "price_currency": "USD",
+            "price_effect": 1072.8111,
+            "quantity_effect": 0.0,
+            "side": "held",
+            "start_price": 150.0,
+            "start_quantity": 40.0,
+            "start_rate": 1.341,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-15T12:00:00+00:00",
           "price_change_pct": 0.1333,
           "price_change_usd": 20.0,
@@ -435,7 +610,8 @@
           "visibility_override": null,
           "wallet_address": "SynthA111111111111111111111111111111111111",
           "wallet_id": "wallet-a-sol",
-          "wallet_label": "A sol"
+          "wallet_label": "A sol",
+          "wrapped_of": null
         },
         {
           "amount": 1000.0,
@@ -446,6 +622,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-17T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": true,
+          "month_change": {
+            "abs": -1341.0138,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 2682.0276,
+            "end_price": 1.0,
+            "end_quantity": 1000.0,
+            "end_rate": 1.341,
+            "end_value": 1341.0138,
+            "fx_effect": 0.0,
+            "pct": -0.5,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": -1341.0138,
+            "side": "held",
+            "start_price": 1.0,
+            "start_quantity": 2000.0,
+            "start_rate": 1.341,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-17T12:00:00+00:00",
           "price_change_pct": 0.0,
           "price_change_usd": 0.0,
@@ -464,7 +661,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         },
         {
           "amount": 250.0,
@@ -475,6 +673,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-15T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": true,
+          "month_change": {
+            "abs": 335.2535,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 0.0,
+            "end_price": 1.0,
+            "end_quantity": 250.0,
+            "end_rate": 1.341,
+            "end_value": 335.2535,
+            "fx_effect": 0.0,
+            "pct": null,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": 335.2535,
+            "side": "new",
+            "start_price": null,
+            "start_quantity": null,
+            "start_rate": null,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-15T12:00:00+00:00",
           "price_change_pct": null,
           "price_change_usd": null,
@@ -493,7 +712,8 @@
           "visibility_override": null,
           "wallet_address": "SynthA111111111111111111111111111111111111",
           "wallet_id": "wallet-a-sol",
-          "wallet_label": "A sol"
+          "wallet_label": "A sol",
+          "wrapped_of": null
         }
       ],
       "top_holdings": [
@@ -506,6 +726,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-17T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": 2883.1797,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 7509.6774,
+            "end_price": 3100.0,
+            "end_quantity": 2.5,
+            "end_rate": 1.341,
+            "end_value": 10392.8571,
+            "fx_effect": 0.0,
+            "pct": 0.3839,
+            "price_currency": "USD",
+            "price_effect": 804.6083,
+            "quantity_effect": 2078.5714,
+            "side": "held",
+            "start_price": 2800.0,
+            "start_quantity": 2.0,
+            "start_rate": 1.341,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-17T12:00:00+00:00",
           "price_change_pct": 0.1071,
           "price_change_usd": 300.0,
@@ -524,7 +765,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         },
         {
           "amount": 40.0,
@@ -535,6 +777,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-15T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": false,
+          "month_change": {
+            "abs": 1072.8111,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 8046.0829,
+            "end_price": 170.0,
+            "end_quantity": 40.0,
+            "end_rate": 1.341,
+            "end_value": 9118.894,
+            "fx_effect": 0.0,
+            "pct": 0.1333,
+            "price_currency": "USD",
+            "price_effect": 1072.8111,
+            "quantity_effect": 0.0,
+            "side": "held",
+            "start_price": 150.0,
+            "start_quantity": 40.0,
+            "start_rate": 1.341,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-15T12:00:00+00:00",
           "price_change_pct": 0.1333,
           "price_change_usd": 20.0,
@@ -553,7 +816,8 @@
           "visibility_override": null,
           "wallet_address": "SynthA111111111111111111111111111111111111",
           "wallet_id": "wallet-a-sol",
-          "wallet_label": "A sol"
+          "wallet_label": "A sol",
+          "wrapped_of": null
         },
         {
           "amount": 1000.0,
@@ -564,6 +828,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-17T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": true,
+          "month_change": {
+            "abs": -1341.0138,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 2682.0276,
+            "end_price": 1.0,
+            "end_quantity": 1000.0,
+            "end_rate": 1.341,
+            "end_value": 1341.0138,
+            "fx_effect": 0.0,
+            "pct": -0.5,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": -1341.0138,
+            "side": "held",
+            "start_price": 1.0,
+            "start_quantity": 2000.0,
+            "start_rate": 1.341,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-17T12:00:00+00:00",
           "price_change_pct": 0.0,
           "price_change_usd": 0.0,
@@ -582,7 +867,8 @@
           "visibility_override": null,
           "wallet_address": "0x00000000000000000000000000000000000a0001",
           "wallet_id": "wallet-a-evm",
-          "wallet_label": "A main"
+          "wallet_label": "A main",
+          "wrapped_of": null
         },
         {
           "amount": 250.0,
@@ -593,6 +879,27 @@
           "hidden_reason": null,
           "holdings_as_of": "2026-03-15T12:00:00+00:00",
           "holdings_provider": null,
+          "is_stablecoin": true,
+          "month_change": {
+            "abs": 335.2535,
+            "baseline_missing": false,
+            "compare_month": "2026-02",
+            "compare_value": 0.0,
+            "end_price": 1.0,
+            "end_quantity": 250.0,
+            "end_rate": 1.341,
+            "end_value": 335.2535,
+            "fx_effect": 0.0,
+            "pct": null,
+            "price_currency": "USD",
+            "price_effect": 0.0,
+            "quantity_effect": 335.2535,
+            "side": "new",
+            "start_price": null,
+            "start_quantity": null,
+            "start_rate": null,
+            "unsplit": 0.0
+          },
           "price_as_of": "2026-03-15T12:00:00+00:00",
           "price_change_pct": null,
           "price_change_usd": null,
@@ -611,7 +918,8 @@
           "visibility_override": null,
           "wallet_address": "SynthA111111111111111111111111111111111111",
           "wallet_id": "wallet-a-sol",
-          "wallet_label": "A sol"
+          "wallet_label": "A sol",
+          "wrapped_of": null
         }
       ],
       "total_crypto_base": 21188.0184,
@@ -4147,6 +4455,8 @@
       "assumed_tax_rate": 0.0,
       "base_currency": "SGD",
       "companies": [],
+      "companies_by_past_payments": 0,
+      "companies_by_yield": 0,
       "country_tax_rates": {},
       "from_month": "2026-03",
       "holdings_considered": 4,
@@ -4517,6 +4827,104 @@
         ],
         "prior_month": "2026-01",
         "prior_month_net": 4528.0,
+        "savings_rate_trend": [
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-03",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-04",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-05",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-06",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-07",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-08",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-09",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-10",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-11",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": 0.0,
+            "inflows": 8000.0,
+            "month": "2025-12",
+            "net": 8000.0,
+            "outflows": 0.0,
+            "savings_rate": 1.0
+          },
+          {
+            "burn_rate": 0.434,
+            "inflows": 8000.0,
+            "month": "2026-01",
+            "net": 4528.0,
+            "outflows": 3472.0,
+            "savings_rate": 0.566
+          },
+          {
+            "burn_rate": 0.3671,
+            "inflows": 10367.5539,
+            "month": "2026-02",
+            "net": 6561.4348,
+            "outflows": 3806.119,
+            "savings_rate": 0.6329
+          }
+        ],
         "top_outflow_merchants": [
           {
             "amount": 2500.0,
@@ -4611,6 +5019,57 @@
           "span_start": "2026-01-30",
           "starting_cash": 56706.9641,
           "transfers_and_funding": 1000.0
+        },
+        "year_over_year": {
+          "basis": "full_month",
+          "has_prior_year_data": false,
+          "inflows": 10367.5539,
+          "month": "2026-02",
+          "net": 6561.4348,
+          "outflow_category_deltas": [
+            {
+              "current_amount": 2500.0,
+              "delta_amount": 2500.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Rent",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 1210.4,
+              "delta_amount": 1210.4,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Shopping",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 95.0,
+              "delta_amount": 95.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Dining",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 0.719,
+              "delta_amount": 0.719,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Withholding tax",
+              "prior_amount": 0.0
+            }
+          ],
+          "outflows": 3806.119,
+          "prior_end": "2025-02-28",
+          "prior_inflows": 0.0,
+          "prior_net": 0.0,
+          "prior_outflows": 0.0,
+          "prior_savings_rate": null,
+          "prior_start": "2025-02-01",
+          "prior_year_month": "2025-02",
+          "savings_rate": 0.6329,
+          "through_day": 28
         }
       },
       "base_currency": "SGD",
@@ -5048,6 +5507,104 @@
         ],
         "prior_month": "2026-02",
         "prior_month_net": 6561.4348,
+        "savings_rate_trend": [
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-04",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-05",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-06",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-07",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-08",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-09",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-10",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-11",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": 0.0,
+            "inflows": 8000.0,
+            "month": "2025-12",
+            "net": 8000.0,
+            "outflows": 0.0,
+            "savings_rate": 1.0
+          },
+          {
+            "burn_rate": 0.434,
+            "inflows": 8000.0,
+            "month": "2026-01",
+            "net": 4528.0,
+            "outflows": 3472.0,
+            "savings_rate": 0.566
+          },
+          {
+            "burn_rate": 0.3671,
+            "inflows": 10367.5539,
+            "month": "2026-02",
+            "net": 6561.4348,
+            "outflows": 3806.119,
+            "savings_rate": 0.6329
+          },
+          {
+            "burn_rate": 8.5101,
+            "inflows": 455.0885,
+            "month": "2026-03",
+            "net": -3417.7656,
+            "outflows": 3872.8541,
+            "savings_rate": -7.5101
+          }
+        ],
         "top_outflow_merchants": [
           {
             "amount": 2500.0,
@@ -5142,6 +5699,49 @@
           "span_start": "2026-02-27",
           "starting_cash": 61000.8589,
           "transfers_and_funding": 0.0
+        },
+        "year_over_year": {
+          "basis": "month_to_date",
+          "has_prior_year_data": false,
+          "inflows": 455.0885,
+          "month": "2026-03",
+          "net": -3417.7656,
+          "outflow_category_deltas": [
+            {
+              "current_amount": 2500.0,
+              "delta_amount": 2500.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Rent",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 712.8541,
+              "delta_amount": 712.8541,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Travel",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 660.0,
+              "delta_amount": 660.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Groceries",
+              "prior_amount": 0.0
+            }
+          ],
+          "outflows": 3872.8541,
+          "prior_end": "2025-03-18",
+          "prior_inflows": 0.0,
+          "prior_net": 0.0,
+          "prior_outflows": 0.0,
+          "prior_savings_rate": null,
+          "prior_start": "2025-03-01",
+          "prior_year_month": "2025-03",
+          "savings_rate": -7.5101,
+          "through_day": 18
         }
       },
       "base_currency": "SGD",
