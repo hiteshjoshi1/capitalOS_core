@@ -1,0 +1,16 @@
+/* Moved from App.css (#368): rules only Alerts.tsx uses. */
+.alertEmptyState {
+  text-align: center;
+  padding: 40px 24px;
+}
+
+.alertEmptyIcon {
+  font-size: 40px;
+  margin: 0 0 8px;
+}
+
+.alertEmptyText {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0;
+}

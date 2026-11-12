@@ -7,6 +7,7 @@ import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber,
 import { noDataFor, noRateFor } from "../lib/delta";
 import { chartColor } from "../lib/chartColors";
 import "../App.css";
+import "./CryptoHoldings.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";

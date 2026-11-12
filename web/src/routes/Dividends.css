@@ -1,0 +1,83 @@
+/* Moved from App.css (#368): rules only Dividends.tsx uses. */
+.dividendSignalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.dividendSignalCard {
+  display: grid;
+  gap: 8px;
+  padding: 22px;
+}
+
+.dividendSignalLabel,
+.dividendSignalValue,
+.dividendSignalContext,
+.dividendCompaniesContext {
+  margin: 0;
+}
+
+.dividendSignalLabel {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dividendSignalValue {
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.dividendSignalContext,
+.dividendCompaniesContext {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dividendHistoryCard {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 24px;
+}
+
+.dividendHistorySection {
+  min-width: 0;
+}
+
+.dividendCompaniesCard {
+  padding: 10px 24px;
+}
+
+.dividendCompaniesContext {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 680px) {
+  .dividendSignalGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dividendSignalCard {
+    padding: 18px;
+  }
+
+  .dividendHistoryCard,
+  .dividendCompaniesCard {
+    padding: 16px;
+  }
+}
+
+/* Income (#267): the last-12-months headline and its monthly bars, above the dividend detail. */
+.incomeHeadline {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}

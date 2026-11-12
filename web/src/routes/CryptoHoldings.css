@@ -1,0 +1,32 @@
+/* Moved from App.css (#368): rules only CryptoHoldings.tsx uses. */
+/* #342: hidden (spam/unknown) wallet tokens and their toggle */
+.cryptoHoldingsToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cryptoHiddenToggle {
+  cursor: pointer;
+  font: inherit;
+}
+
+/* #408 (U10): stablecoin filter and the stablecoin / wrapped tags. */
+.cryptoKindFilter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cryptoKindTag {
+  font-weight: 500;
+}
+
+.cryptoHoldingHidden {
+  opacity: 0.6;
+}
+
+.cryptoVisibilityBtn {
+  margin-left: 8px;
+}

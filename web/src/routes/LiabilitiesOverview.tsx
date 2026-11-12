@@ -10,6 +10,7 @@ import { chartColor } from "../lib/chartColors";
 import { computeDueStatus, dueSortValue, formatShortDate } from "../lib/dueStatus";
 import type { DueStatus } from "../lib/dueStatus";
 import "../App.css";
+import "./LiabilitiesOverview.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";

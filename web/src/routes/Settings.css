@@ -1,0 +1,5 @@
+/* Moved from App.css (#368): rules only Settings.tsx uses. */
+.settingsStack {
+  display: grid;
+  gap: 16px;
+}

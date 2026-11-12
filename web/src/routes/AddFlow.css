@@ -1,3 +1,11 @@
+/* Moved from App.css (#368): rules only AddFlow.tsx uses. */
+/* ── Add Crypto Wallets: mobile desktop-only connect notice ── */
+
+.cryptoMobileNotice {
+  border-style: dashed;
+  background: var(--panel2);
+}
+
 /* Data Hub → "+ Add" (#319): a four-step flow; one column, phone-first. */
 .addFlow {
   display: grid;

@@ -4,6 +4,7 @@ import type { CategoryTaxonomy, UnmappedTransaction } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
+import "./CashFlowMapping.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import * as fmt from "../lib/format";
