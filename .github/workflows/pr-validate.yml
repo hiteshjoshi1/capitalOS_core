@@ -73,6 +73,8 @@ jobs:
 
       - name: Migrate an empty Postgres, check the schema, run the Postgres tests
         run: make db-schema-check
+      - name: Restore an older backup into a newer database (#416)
+        run: make db-restore-check
 
   # #73: the real stack (Postgres + API + the production web container) on demo data, every page
   # at phone and desktop width, and screenshot diffs against web/tests/smoke/__screenshots__.

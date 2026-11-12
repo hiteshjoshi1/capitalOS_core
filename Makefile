@@ -539,11 +539,17 @@ db-migrate: db-wait
 			continue; \
 		fi; \
 		echo "==> $$f"; \
-		{ cat "$$f"; printf "\nINSERT INTO schema_migrations (filename) VALUES ('%s');\n" "$$filename"; } | \
+		scripts/migration-sql.sh "$$f" | \
 			docker exec -i $(DB_CONTAINER) psql -q -1 -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) > /dev/null || { \
 			echo "Migration $$f FAILED: rolled back, not recorded; later migrations not run." >&2; exit 1; }; \
 	done
 	@echo "Migrations complete."
+
+# #416: restore an older backup into a newer database, against a throwaway real Postgres (pinned
+# image, no published port, removed after): synthetic migrations and data only. CI: postgres job.
+db-restore-check:
+	@scripts/test-db-restore-pg.sh
+
 
 # Postgres schema check (#154; CI job "postgres" in pr-validate.yml): a throwaway Postgres 16
 # (own compose project, container, port, volume; never the real stack's), every migration applied

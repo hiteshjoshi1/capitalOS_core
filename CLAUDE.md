@@ -80,6 +80,10 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   current `data/` is moved to `data.pre-restore-<ts>/`). The database part is one transaction, committed
   only when every table's count matches the dump's snapshot; grants to a role the target lacks (e.g.
   `capitalos_mcp_ro` on a new stack: run `make db-create-mcp-role` after) are left out and named (#233).
+  It starts from an empty `public` schema (owner and schema grants kept) and, in the same transaction,
+  applies this checkout's migrations newer than the backup, so an older backup restores into a newer
+  database (#416, D-116); any failure, a migration on the restored data included, changes nothing.
+  `make db-restore-check` proves it against a throwaway Postgres (CI: postgres job).
 - Encrypted, outside the repo (#356, D-95; one iCloud Drive folder, #383, D-105): the main checkout's `.env`
   sets `BACKUP_DIR` (`~/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups`, Keep Downloaded:
   the Mac's copy and the off-site one in one) and `BACKUP_AGE_RECIPIENT` (age public key); each set is made and

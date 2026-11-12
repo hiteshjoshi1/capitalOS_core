@@ -47,6 +47,9 @@ set -euo pipefail
 # shellcheck source=backup-env.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup-env.sh"
 AGE_TOOL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/age-tool.sh"
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The numbered migrations a restore brings the database up to (#416): this checkout's.
+MIGRATIONS_DIR=${MIGRATIONS_DIR:-$SCRIPTS_DIR/../migrations}
 
 DB_USER=${DB_USER:-capitalos}
 DB_NAME=${DB_NAME:-capitalos}
@@ -682,21 +685,65 @@ counts_check_sql() {  # <counts file>
 END \$counts\$;"
 }
 
+# #416: the restore starts from an empty public schema instead of `pg_restore --clean`, which
+# only drops what the dump has: a table a newer migration added (086: user_last_visit -> users)
+# blocked dropping its parent, so an older backup couldn't be restored into a newer database.
+# The schema's owner and its own grants (e.g. USAGE to PUBLIC, which pg_dump leaves out as the
+# default) are kept from the target; the dump's ACL step re-grants the rest, as before.
+SCHEMA_RESET_SQL="CREATE TEMP TABLE restore_public_schema ON COMMIT DROP AS
+  SELECT n.nspowner::pg_catalog.regrole::text AS owner, a.grantee, a.privilege_type
+  FROM pg_catalog.pg_namespace n LEFT JOIN LATERAL pg_catalog.aclexplode(n.nspacl) a ON true
+  WHERE n.nspname = 'public';
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+DO \$schema\$ DECLARE r record; BEGIN
+  EXECUTE pg_catalog.format('ALTER SCHEMA public OWNER TO %s', (SELECT owner FROM restore_public_schema LIMIT 1));
+  FOR r IN SELECT DISTINCT grantee, privilege_type FROM restore_public_schema WHERE grantee IS NOT NULL LOOP
+    EXECUTE pg_catalog.format('GRANT %s ON SCHEMA public TO %s', r.privilege_type,
+      CASE WHEN r.grantee = 0 THEN 'PUBLIC' ELSE r.grantee::pg_catalog.regrole::text END);
+  END LOOP;
+END \$schema\$;"
+
+# The migrations a dump has applied (its schema_migrations rows), one filename per line; exits 3
+# when the dump has no schema_migrations data (made before migration tracking).
+dump_migrations() {  # <plain dump>
+  docker exec -i "$DB_CONTAINER" pg_restore --data-only -t schema_migrations -f - <"$1" |
+    awk '/^COPY .*schema_migrations/ { copy = 1; seen = 1; next } copy && /^\\\.$/ { copy = 0; next }
+         copy { split($0, f, "\t"); print f[1] } END { if (!seen) exit 3 }'
+}
+
+# This checkout's migrations the dump hasn't applied, oldest first (paths).
+pending_migrations() {  # <file of applied filenames>
+  local f
+  for f in $(ls -1 "$MIGRATIONS_DIR"/[0-9][0-9][0-9]_*.sql 2>/dev/null | sort); do
+    grep -qxF "$(basename "$f")" "$1" || printf '%s\n' "$f"
+  done
+}
+
 # The restore script for psql: one transaction, committed only if pg_restore produced the whole
-# script (a pg_restore failure leaves no COMMIT, so psql's session ends and rolls back) and,
-# when the dump has snapshot counts, every table's count matches them.
-restore_sql() {  # <dump> <acl sql file>
+# script (a pg_restore failure leaves no COMMIT, so psql's session ends and rolls back), when the
+# dump has snapshot counts every table's count matches them, and every newer migration (#416)
+# applied to the restored data. Any failure leaves the target database as it was.
+restore_sql() {  # <dump> <acl sql file> [<pending migrations file>]
   printf 'BEGIN;\n'
-  docker exec -i "$DB_CONTAINER" pg_restore --clean --if-exists --no-privileges -f - <"$1" || return 1
+  printf '%s\n' "$SCHEMA_RESET_SQL"
+  docker exec -i "$DB_CONTAINER" pg_restore --no-privileges -f - <"$1" || return 1
   printf '%s\n' "$RESET_DEFAULT_GRANTS_SQL"
   cat "$2"
   [ ! -f "$1.counts" ] || counts_check_sql "$1.counts"
+  if [ -n "${3:-}" ] && [ -s "$3" ]; then
+    # pg_restore's script empties search_path and sets other session options; migrations are
+    # written for the defaults, as `make db-migrate` runs them.
+    printf 'RESET ALL;\n'
+    # shellcheck disable=SC2046
+    "$SCRIPTS_DIR/migration-sql.sh" $(cat "$3") || return 1
+  fi
   printf 'COMMIT;\n'
 }
 
 # Database first (data/ untouched if it fails), then data/ from the same set.
 restore() {
-  local dump=${1:?restore needs a dump file} archive ts rows result roles acl skipped src
+  local dump=${1:?restore needs a dump file} archive ts rows result roles acl skipped src applied pending ahead
   set_present "$dump" || { say "FAILED: no such file $dump" >&2; return 1; }
   # An encrypted set is restored from a decrypted copy in a private temp dir (#356).
   open_set "$dump" || { say "FAILED: $dump was not opened (see above); nothing was changed" >&2; return 1; }
@@ -712,6 +759,15 @@ restore() {
   if ! docker exec -i "$DB_CONTAINER" pg_restore --schema-only -f - <"$src" | acl_statements "$roles" "$skipped" >"$acl"; then
     say "FAILED: could not read the privileges in $dump; nothing was changed" >&2; return 1
   fi
+  applied="$WORK/applied" pending="$WORK/pending"
+  : >"$pending"
+  if dump_migrations "$src" >"$applied"; then
+    pending_migrations "$applied" >"$pending"
+    ahead=$(while IFS= read -r m; do [ -f "$MIGRATIONS_DIR/$m" ] || printf '%s ' "$m"; done <"$applied")
+    [ -z "$ahead" ] || say "WARNING: the backup has migrations this checkout doesn't ($ahead): it is from newer code; deploy that code before using it"
+  else
+    say "WARNING: $dump records no migrations (made before migration tracking): restored as it is; run make db-adopt-migrations, then make db-migrate"
+  fi
   if [ -f "$archive" ]; then
     STAGE="$BACKUP_DATA_DIR.restore-$ts"
     mkdir "$STAGE"
@@ -720,15 +776,18 @@ restore() {
     say "WARNING: no data archive for $dump (backup predates #155): only the database is restored, $BACKUP_DATA_DIR/ is left as it is"
   fi
   say "Restoring the database $DB_NAME in $DB_CONTAINER (one transaction)"
-  if ! restore_sql "$src" "$acl" |
+  if ! restore_sql "$src" "$acl" "$pending" |
       docker exec -i "$DB_CONTAINER" psql -X -q -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" >/dev/null \
       2> >(grep -vi collation >&2); then
-    say "FAILED: the database restore failed and was rolled back; $BACKUP_DATA_DIR/ is unchanged" >&2; return 1
+    say "FAILED: the database restore failed and was rolled back (the database is as it was before; a newer migration failing on the restored data rolls it back too); $BACKUP_DATA_DIR/ is unchanged" >&2; return 1
   fi
   if [ -f "$src.counts" ]; then
     say "Database restored: $(wc -l <"$src.counts" | tr -d ' ') tables, $(awk -F'|' '{s+=$2} END {print s+0}' "$src.counts") rows, counts identical to the dump's snapshot; $(grep -c . "$acl" || true) of its privilege statements applied"
   else
     say "Database restored (no snapshot counts to compare: the dump predates #41); $(grep -c . "$acl" || true) of its privilege statements applied"
+  fi
+  if [ -s "$pending" ]; then
+    say "Brought up to this checkout's version in the same transaction: $(grep -c . "$pending") newer migration(s) applied ($(xargs -n1 basename <"$pending" | tr '\n' ' '| sed 's/ $//'))"
   fi
   if [ -s "$skipped" ]; then
     say "Left out $(grep -c . "$skipped") privilege statement(s) for role(s) this Postgres doesn't have: $(sed 's/^SKIPPED \([^|]*\)|.*/\1/' "$skipped" | sort -u | tr '\n' ' ')(for capitalos_mcp_ro: make db-create-mcp-role grants them)"
