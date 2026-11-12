@@ -70,10 +70,13 @@ def measure(db: Session, user_id: int, account_id: int, day: date) -> Optional[d
     from app.valuation.clock import _month_view_anchor, _parse_month
     from app.valuation.facts import _networth_components
     from app.valuation.state import _cash_positions
+    from app.fx import stored_rates_only
     from app.valuation_cache import request_scope
 
     try:
-        with use_timezone(effective_timezone(db, user_id)), request_scope():
+        # Stored rates only (#292's scope): measuring must not fetch past rates, which would
+        # store them and mark History dirty from their date (a side effect of the upload).
+        with use_timezone(effective_timezone(db, user_id)), request_scope(), stored_rates_only():
             month = day.strftime("%Y-%m")
             anchor, live = _month_view_anchor(_parse_month(month))
             base = _base_currency(db, user_id)
