@@ -51,3 +51,21 @@ def test_effect_is_left_out_unless_both_sides_were_measured_for_one_month():
     assert out == {"month": "2026-10", "live": False, "base_currency": "SGD", "balance": 50.0, "balance_date": "2026-10-31",
                    "net_worth_before": 100.0, "net_worth_after": 150.0, "net_worth_change": 50.0}
     assert effect(None, after) is None and effect(before, {**after, "month": "2026-11"}) is None
+
+
+def test_month_closed_counts_a_balance_carried_from_before_the_month(monkeypatch):
+    from datetime import datetime
+
+    from app.services import insight_alerts
+    from app.valuation import clock, history
+
+    monkeypatch.setattr(clock, "_current_anchor_ts", lambda: datetime(2026, 11, 12, 9, 0))
+    monkeypatch.setattr(history, "_wealth_rollup_row", lambda *_a, **_k: {"source_freshness": [
+        {"platform": "UOB", "as_of": "2026-07-04", "status": "carried"},
+        {"platform": "DBS", "as_of": "2026-10-02", "status": "carried"},  # within October: fine
+        {"platform": "IBKR", "as_of": "2026-10-30", "status": "fresh"},
+    ]})
+    items = insight_alerts.month_closed_items(None, SimpleNamespace(id=1), "SGD")
+    assert [i.kind for i in items] == ["month_closed_stale"]
+    assert items[0].title == "Oct 2026 closed with stale data" and "UOB (4 Jul)" in items[0].detail
+    assert "DBS" not in items[0].detail

@@ -2,7 +2,8 @@
 
 Four checks, each cheap and each with one action:
 - **month_closed_stale**: the latest completed month closed while a source's newest data
-  was stale for it (History's per-month freshness, D-29). Its figures are partly carried.
+  was stale for it, or carried from before the month began (History's per-month
+  freshness, D-29). Its figures are partly carried.
 - **concentration**: the largest single holding is above CONCENTRATION_PCT of net worth
   (Risk's top holdings, live for the open month).
 - **unusual_move**: the latest completed month's net-worth change is far outside the
@@ -74,7 +75,13 @@ def month_closed_items(db: Session, user: CurrentUser, base: str) -> list[InboxI
     month_start = _latest_completed_month_start(_current_anchor_ts())
     month = month_start.strftime("%Y-%m")
     row = _wealth_rollup_row(db, _anchor_ts(month_start), base, user.id)
-    stale = [e for e in row["source_freshness"] if e.get("status") in ("stale", "missing")]
+    # Stale or missing, or carried from before the month began (e.g. a bank's July balance
+    # standing in for October): the month closed without that source's data for it.
+    stale = [
+        e for e in row["source_freshness"]
+        if e.get("status") in ("stale", "missing")
+        or (e.get("status") == "carried" and str(e.get("as_of") or "") < month_start.date().isoformat())
+    ]
     if not stale:
         return []
     names = ", ".join(
@@ -157,8 +164,8 @@ def unusual_move(totals: list[tuple[str, float]], base: str) -> Optional[InboxIt
 
 
 def recurring_items(db: Session, user: CurrentUser, base: str) -> list[InboxItem]:
-    from app.routers.spending import RECURRING_LOOKBACK_MONTHS, _credit_card_recurring_payments
-    from app.valuation.clock import _add_months, _month_end
+    from app.routers.spending import RECURRING_LOOKBACK_MONTHS, _credit_card_recurring_payments, _month_end
+    from app.valuation.clock import _add_months
 
     month = _open_month()
     month_start = _month_start(month)
@@ -208,6 +215,12 @@ def insight_items(db: Session, user: CurrentUser, base: str, safe: Callable[[Cal
     """Every check above; one failing doesn't hide the others (``safe`` is the inbox's guard)."""
     out: list[InboxItem] = []
     for check in CHECKS:
-        out.extend(safe(lambda check=check: check(db, user, base), []))
+        out.extend(safe(_bound(check, db, user, base), []))
     return out
+
+
+def _bound(
+    check: Callable[[Session, CurrentUser, str], list[InboxItem]], db: Session, user: CurrentUser, base: str
+) -> Callable[[], list[InboxItem]]:
+    return lambda: check(db, user, base)
 
