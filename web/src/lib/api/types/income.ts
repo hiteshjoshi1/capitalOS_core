@@ -155,3 +155,43 @@ export type ExpectedDividendsOverview = {
   companies_by_yield?: number;
   companies_by_past_payments?: number;
 };
+
+/** #417 (U17, D-117): one expected dividend in the calendar window. */
+export type DividendCalendarEvent = {
+  asset_id: number;
+  symbol: string;
+  company: string;
+  /** When it's expected: the pay date when known, else the ex-date, else (your payments) a year
+   * after you were last paid. */
+  date: string;
+  ex_date: string | null;
+  pay_date: string | null;
+  shares: number;
+  amount_per_share: number | null;
+  currency: string;
+  /** Gross: shares held now x amount per share. */
+  amount: number;
+  amount_base: number | null;
+  /** "announced" (the provider lists the ex-date), "projected" (from the holding's past
+   * dividends) or "your_payments" (your own dividend from it a year earlier). */
+  basis: "announced" | "projected" | "your_payments" | string;
+  estimated: boolean;
+};
+
+export type DividendCalendarMonth = { month: string; amount_base: number; count: number };
+
+export type DividendCalendar = {
+  base_currency: string;
+  from_date: string;
+  to_date: string;
+  events: DividendCalendarEvent[];
+  months: DividendCalendarMonth[];
+  total_base: number;
+  holdings_considered: number;
+  holdings_with_events: number;
+  /** Held but nothing expected in the window. */
+  holdings_without_data: number;
+  /** Of those: no dividend history at all. */
+  holdings_no_dividend_history?: number;
+  data_as_of: string | null;
+};

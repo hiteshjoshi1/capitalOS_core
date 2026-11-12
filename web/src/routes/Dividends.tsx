@@ -16,6 +16,7 @@ import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
+import DividendCalendarCard from "../components/DividendCalendarCard";
 
 type CompanyTab = "realized" | "expected";
 
@@ -260,6 +261,8 @@ export default function Dividends() {
               </article>
             </div>
           </section>
+
+          <DividendCalendarCard baseCurrency={shownCurrency} />
 
           <section className="dividendHistorySection" aria-labelledby="dividend-history-heading">
             <div className="coSectionHeader">

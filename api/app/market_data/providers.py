@@ -716,6 +716,87 @@ class YFinanceProvider(GenericMarketDataProvider):
             return {}
         return out
 
+    @staticmethod
+    def _calendar_date(value: object) -> date | None:
+        """A date from a yfinance calendar value (a date, a datetime, or a list of them)."""
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if hasattr(value, "date"):
+            try:
+                return value.date()  # pandas Timestamp
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def fetch_dividend_events(
+        self,
+        symbols: list[str],
+        *,
+        exchange_code: str | None = None,
+        history_days: int = 800,
+    ) -> dict[str, dict[str, object]]:
+        """#417 (D-117): per symbol, its past dividends and the next listed ex-date.
+
+        Returns {original symbol: {"history": [(ex_date, amount per share), ...] oldest first,
+        "announced": {"ex_date": date, "pay_date": date | None} or None}}. A symbol whose lookups
+        all fail is left out; one failure doesn't stop the others. Yahoo's calendar has no amount
+        for the next dividend, and outside the US it rarely has a pay date (checked 12 Nov 2026 on
+        the real holdings: pay dates for US only)."""
+        if not symbols:
+            return {}
+        yf = self._load_yfinance()
+        sleep_ms = max(0, int(os.getenv("YFINANCE_SLEEP_MS", "250")))
+        cutoff = datetime.now(tz=timezone.utc).date() - timedelta(days=history_days)
+        out: dict[str, dict[str, object]] = {}
+        for idx, original in enumerate(symbols):
+            key = original.strip().upper()
+            symbol = self._normalize_symbol(key, exchange_code)
+            if not symbol:
+                continue
+            history: list[tuple[date, float]] = []
+            announced: dict[str, date | None] | None = None
+            ok = False
+            try:
+                ticker = yf.Ticker(symbol)
+                try:
+                    series = ticker.dividends
+                    for ts, value in series.items():
+                        amount = self._to_float_or_none(value)
+                        event_date = self._calendar_date(ts)
+                        if amount is None or amount <= 0 or event_date is None or event_date < cutoff:
+                            continue
+                        history.append((event_date, amount))
+                    ok = True
+                except Exception as exc:  # noqa: BLE001
+                    if _is_rate_limit_error(exc):
+                        raise
+                try:
+                    calendar = ticker.calendar or {}
+                    if isinstance(calendar, dict):
+                        ex_date = self._calendar_date(calendar.get("Ex-Dividend Date"))
+                        if ex_date is not None:
+                            announced = {
+                                "ex_date": ex_date,
+                                "pay_date": self._calendar_date(calendar.get("Dividend Date")),
+                            }
+                    ok = True
+                except Exception as exc:  # noqa: BLE001
+                    if _is_rate_limit_error(exc):
+                        raise
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limit_error(exc):
+                    raise
+            if ok:
+                history.sort()
+                out[key] = {"history": history, "announced": announced}
+            if idx < len(symbols) - 1 and sleep_ms > 0:
+                time.sleep(sleep_ms / 1000.0)
+        return out
+
     def fetch_corporate_actions(
         self,
         symbols: list[str],
