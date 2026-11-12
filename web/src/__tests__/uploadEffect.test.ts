@@ -27,7 +27,7 @@ describe("uploadEffectLine (#410, U28)", () => {
 
   it("works without a balance (a card or holdings file)", () => {
     expect(uploadEffectLine({ ...base, balance: null, balance_date: null, net_worth_change: -40, net_worth_after: 99960 })).toBe(
-      "Net worth for Oct 2026 −S$ 40 (S$ 100,000 → S$ 99,960)",
+      "Net worth for Oct 2026 -S$ 40 (S$ 100,000 → S$ 99,960)",
     );
   });
 });
