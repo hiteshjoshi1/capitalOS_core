@@ -151,7 +151,7 @@ export default function Dividends() {
 
   return (
     <PageShell
-      title="Income"
+      title="Dividends"
       subtitle="Dividends and interest received, compared with a year earlier, and what your holdings are projected to pay next."
       activeRoute="/income"
       monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
