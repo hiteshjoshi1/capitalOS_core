@@ -6086,44 +6086,64 @@
     "buckets": [
      {
       "bucket": "2026-11",
-      "gross": 0,
+      "gross": 1733.3333333333333,
       "estimated_tax": 0,
-      "payout_minus_tax": 0
+      "payout_minus_tax": 1733.3333333333333
      }
     ],
-    "gross": 0,
+    "gross": 1733.3333333333333,
     "estimated_tax": 0,
-    "payout_minus_tax": 0
+    "payout_minus_tax": 1733.3333333333333
    },
    "quarterly": {
     "period": "quarter",
     "buckets": [
      {
       "bucket": "2026-Q4",
-      "gross": 0,
+      "gross": 5200,
       "estimated_tax": 0,
-      "payout_minus_tax": 0
+      "payout_minus_tax": 5200
      }
     ],
-    "gross": 0,
+    "gross": 5200,
     "estimated_tax": 0,
-    "payout_minus_tax": 0
+    "payout_minus_tax": 5200
    },
    "yearly": {
     "period": "year",
     "buckets": [
      {
       "bucket": "2026",
-      "gross": 0,
+      "gross": 20800,
       "estimated_tax": 0,
-      "payout_minus_tax": 0
+      "payout_minus_tax": 20800
      }
     ],
-    "gross": 0,
+    "gross": 20800,
     "estimated_tax": 0,
-    "payout_minus_tax": 0
+    "payout_minus_tax": 20800
    },
-   "companies": []
+   "companies": [
+    {
+     "asset_id": 29,
+     "symbol": "D05",
+     "company": "DBS Group Holdings Ltd.",
+     "country": "SG",
+     "shares": 18000,
+     "yield_pct": null,
+     "price": null,
+     "quote_currency": "SGD",
+     "yearly_dividend": 20800,
+     "quarterly_dividend": 5200,
+     "monthly_dividend": 1733.3333333333333,
+     "gross": 20800,
+     "estimated_tax": 0,
+     "payout_minus_tax": 20800,
+     "method": "past_payments"
+    }
+   ],
+   "companies_by_yield": 0,
+   "companies_by_past_payments": 1
   }
  },
  "/dividends/summary?from_month=2024-12&to_month=2026-11&period=month&base_currency=SGD&assumed_tax_rate=0": {
@@ -7831,7 +7851,252 @@
        "direction": "deteriorated"
       }
      ]
-    }
+    },
+    "year_over_year": {
+     "basis": "month_to_date",
+     "month": "2026-11",
+     "prior_year_month": "2025-11",
+     "through_day": 12,
+     "prior_start": "2025-11-01",
+     "prior_end": "2025-11-12",
+     "has_prior_year_data": false,
+     "inflows": 125200,
+     "outflows": 82212.9,
+     "net": 42987.100000000006,
+     "savings_rate": 0.3433474440894569,
+     "prior_inflows": 0,
+     "prior_outflows": 0,
+     "prior_net": 0,
+     "prior_savings_rate": null,
+     "outflow_category_deltas": [
+      {
+       "label": "Travel",
+       "current_amount": 30305,
+       "prior_amount": 0,
+       "delta_amount": 30305,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Household",
+       "current_amount": 19500,
+       "prior_amount": 0,
+       "delta_amount": 19500,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Shopping",
+       "current_amount": 9775,
+       "prior_amount": 0,
+       "delta_amount": 9775,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Education",
+       "current_amount": 7000,
+       "prior_amount": 0,
+       "delta_amount": 7000,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Experiences",
+       "current_amount": 4025,
+       "prior_amount": 0,
+       "delta_amount": 4025,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Dining",
+       "current_amount": 3795,
+       "prior_amount": 0,
+       "delta_amount": 3795,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Insurance",
+       "current_amount": 2200,
+       "prior_amount": 0,
+       "delta_amount": 2200,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Membership",
+       "current_amount": 1200,
+       "prior_amount": 0,
+       "delta_amount": 1200,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Subscription",
+       "current_amount": 1194,
+       "prior_amount": 0,
+       "delta_amount": 1194,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Groceries",
+       "current_amount": 1035,
+       "prior_amount": 0,
+       "delta_amount": 1035,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Wellness",
+       "current_amount": 800,
+       "prior_amount": 0,
+       "delta_amount": 800,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Utilities",
+       "current_amount": 660,
+       "prior_amount": 0,
+       "delta_amount": 660,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Transport",
+       "current_amount": 402.5,
+       "prior_amount": 0,
+       "delta_amount": 402.5,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Fees",
+       "current_amount": 196.2,
+       "prior_amount": 0,
+       "delta_amount": 196.2,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Interest",
+       "current_amount": 114.86,
+       "prior_amount": 0,
+       "delta_amount": 114.86,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      },
+      {
+       "label": "Tax",
+       "current_amount": 10.34,
+       "prior_amount": 0,
+       "delta_amount": 10.34,
+       "delta_percent": null,
+       "direction": "deteriorated"
+      }
+     ]
+    },
+    "savings_rate_trend": [
+     {
+      "month": "2025-12",
+      "inflows": 120000,
+      "outflows": 71034,
+      "net": 48966,
+      "savings_rate": 0.40805,
+      "burn_rate": 0.59195
+     },
+     {
+      "month": "2026-01",
+      "inflows": 120000,
+      "outflows": 70694,
+      "net": 49306,
+      "savings_rate": 0.4108833333333333,
+      "burn_rate": 0.5891166666666666
+     },
+     {
+      "month": "2026-02",
+      "inflows": 125200,
+      "outflows": 58986.5,
+      "net": 66213.5,
+      "savings_rate": 0.528861821086262,
+      "burn_rate": 0.471138178913738
+     },
+     {
+      "month": "2026-03",
+      "inflows": 120000,
+      "outflows": 70874,
+      "net": 49126,
+      "savings_rate": 0.4093833333333333,
+      "burn_rate": 0.5906166666666667
+     },
+     {
+      "month": "2026-04",
+      "inflows": 120000,
+      "outflows": 57624,
+      "net": 62376,
+      "savings_rate": 0.5198,
+      "burn_rate": 0.4802
+     },
+     {
+      "month": "2026-05",
+      "inflows": 125200,
+      "outflows": 74484,
+      "net": 50716,
+      "savings_rate": 0.40507987220447284,
+      "burn_rate": 0.5949201277955272
+     },
+     {
+      "month": "2026-06",
+      "inflows": 120000,
+      "outflows": 59804,
+      "net": 60196,
+      "savings_rate": 0.5016333333333334,
+      "burn_rate": 0.4983666666666667
+     },
+     {
+      "month": "2026-07",
+      "inflows": 120000,
+      "outflows": 97529,
+      "net": 22471,
+      "savings_rate": 0.18725833333333333,
+      "burn_rate": 0.8127416666666667
+     },
+     {
+      "month": "2026-08",
+      "inflows": 125200,
+      "outflows": 63279,
+      "net": 61921,
+      "savings_rate": 0.49457667731629396,
+      "burn_rate": 0.505423322683706
+     },
+     {
+      "month": "2026-09",
+      "inflows": 120000,
+      "outflows": 83166.5,
+      "net": 36833.5,
+      "savings_rate": 0.3069458333333333,
+      "burn_rate": 0.6930541666666666
+     },
+     {
+      "month": "2026-10",
+      "inflows": 120000,
+      "outflows": 58441.5,
+      "net": 61558.5,
+      "savings_rate": 0.5129875,
+      "burn_rate": 0.4870125
+     },
+     {
+      "month": "2026-11",
+      "inflows": 125200,
+      "outflows": 82212.9,
+      "net": 42987.100000000006,
+      "savings_rate": 0.3433474440894569,
+      "burn_rate": 0.6566525559105431
+     }
+    ]
    },
    "income": {
     "total": 125200,
@@ -9861,6 +10126,429 @@
     "HKD",
     "INR"
    ]
+  }
+ },
+ "/dashboard/risk-summary?month=2026-10&base_currency=SGD": {
+  "status": 200,
+  "body": {
+   "fx_incomplete": false,
+   "fx_missing_currencies": [],
+   "fx_stale_currencies": [],
+   "as_of_month": "2026-10",
+   "base_currency": "SGD",
+   "snapshot_day": 1,
+   "is_live": false,
+   "net_worth": {
+    "total": 10309408.44587646,
+    "cash": 1946357.1435,
+    "stocks_funds": 6536003.26025146,
+    "crypto": 1856789.542125,
+    "liabilities": 29741.5
+   },
+   "top_holdings": [
+    {
+     "asset_id": null,
+     "symbol": "ETH",
+     "asset_class": "CRYPTO",
+     "value": 651505.1025,
+     "percent_of_networth": 6.32
+    },
+    {
+     "asset_id": 29,
+     "symbol": "D05",
+     "asset_class": "STOCK",
+     "value": 549630,
+     "percent_of_networth": 5.33
+    },
+    {
+     "asset_id": null,
+     "symbol": "USDC",
+     "asset_class": "CRYPTO",
+     "value": 508173.97995,
+     "percent_of_networth": 4.93
+    },
+    {
+     "asset_id": 34,
+     "symbol": "0700",
+     "asset_class": "STOCK",
+     "value": 350810.44286043,
+     "percent_of_networth": 3.4
+    },
+    {
+     "asset_id": 5,
+     "symbol": "MSFT",
+     "asset_class": "STOCK",
+     "value": 328358.57166,
+     "percent_of_networth": 3.19
+    },
+    {
+     "asset_id": null,
+     "symbol": "SOL",
+     "asset_class": "CRYPTO",
+     "value": 325752.55125,
+     "percent_of_networth": 3.16
+    },
+    {
+     "asset_id": 30,
+     "symbol": "U11",
+     "asset_class": "STOCK",
+     "value": 319140,
+     "percent_of_networth": 3.1
+    },
+    {
+     "asset_id": 4,
+     "symbol": "SGDMMF",
+     "asset_class": "FUND",
+     "value": 295500,
+     "percent_of_networth": 2.87
+    },
+    {
+     "asset_id": 10,
+     "symbol": "AAPL",
+     "asset_class": "STOCK",
+     "value": 287965.255305,
+     "percent_of_networth": 2.79
+    },
+    {
+     "asset_id": 31,
+     "symbol": "O39",
+     "asset_class": "STOCK",
+     "value": 281710,
+     "percent_of_networth": 2.73
+    },
+    {
+     "asset_id": 23,
+     "symbol": "REGN",
+     "asset_class": "STOCK",
+     "value": 280147.194075,
+     "percent_of_networth": 2.72
+    },
+    {
+     "asset_id": 7,
+     "symbol": "META",
+     "asset_class": "STOCK",
+     "value": 280147.194075,
+     "percent_of_networth": 2.72
+    },
+    {
+     "asset_id": 6,
+     "symbol": "GOOGL",
+     "asset_class": "STOCK",
+     "value": 273632.14305,
+     "percent_of_networth": 2.65
+    },
+    {
+     "asset_id": 22,
+     "symbol": "NVO",
+     "asset_class": "STOCK",
+     "value": 259950.5358975,
+     "percent_of_networth": 2.52
+    },
+    {
+     "asset_id": 9,
+     "symbol": "NVDA",
+     "asset_class": "STOCK",
+     "value": 257996.02059,
+     "percent_of_networth": 2.5
+    },
+    {
+     "asset_id": 21,
+     "symbol": "LLY",
+     "asset_class": "STOCK",
+     "value": 255390.00018,
+     "percent_of_networth": 2.48
+    },
+    {
+     "asset_id": 8,
+     "symbol": "AMZN",
+     "asset_class": "STOCK",
+     "value": 250177.95936,
+     "percent_of_networth": 2.43
+    },
+    {
+     "asset_id": 35,
+     "symbol": "9988",
+     "asset_class": "STOCK",
+     "value": 240555.73829448,
+     "percent_of_networth": 2.33
+    },
+    {
+     "asset_id": 33,
+     "symbol": "H02",
+     "asset_class": "STOCK",
+     "value": 206850,
+     "percent_of_networth": 2.01
+    },
+    {
+     "asset_id": 36,
+     "symbol": "0388",
+     "asset_class": "STOCK",
+     "value": 183824.67147681,
+     "percent_of_networth": 1.78
+    },
+    {
+     "asset_id": 11,
+     "symbol": "TSLA",
+     "asset_class": "STOCK",
+     "value": 182421.4287,
+     "percent_of_networth": 1.77
+    },
+    {
+     "asset_id": 32,
+     "symbol": "S68",
+     "asset_class": "STOCK",
+     "value": 147750,
+     "percent_of_networth": 1.43
+    },
+    {
+     "asset_id": null,
+     "symbol": "BTC",
+     "asset_class": "CRYPTO",
+     "value": 130301.0205,
+     "percent_of_networth": 1.26
+    },
+    {
+     "asset_id": 12,
+     "symbol": "BRK-B",
+     "asset_class": "STOCK",
+     "value": 130092.5388672,
+     "percent_of_networth": 1.26
+    },
+    {
+     "asset_id": 27,
+     "symbol": "AVGO",
+     "asset_class": "STOCK",
+     "value": 114143.693958,
+     "percent_of_networth": 1.11
+    },
+    {
+     "asset_id": 17,
+     "symbol": "JPM",
+     "asset_class": "STOCK",
+     "value": 114013.3929375,
+     "percent_of_networth": 1.11
+    },
+    {
+     "asset_id": null,
+     "symbol": "JUP",
+     "asset_class": "CRYPTO",
+     "value": 110755.867425,
+     "percent_of_networth": 1.07
+    },
+    {
+     "asset_id": 18,
+     "symbol": "V",
+     "asset_class": "STOCK",
+     "value": 108475.59956625,
+     "percent_of_networth": 1.05
+    },
+    {
+     "asset_id": 28,
+     "symbol": "CRM",
+     "asset_class": "STOCK",
+     "value": 107394.1010961,
+     "percent_of_networth": 1.04
+    },
+    {
+     "asset_id": 20,
+     "symbol": "UNH",
+     "asset_class": "STOCK",
+     "value": 100852.989867,
+     "percent_of_networth": 0.98
+    },
+    {
+     "asset_id": 19,
+     "symbol": "MA",
+     "asset_class": "STOCK",
+     "value": 99172.10670255,
+     "percent_of_networth": 0.96
+    },
+    {
+     "asset_id": 13,
+     "symbol": "XOM",
+     "asset_class": "STOCK",
+     "value": 95686.56101844,
+     "percent_of_networth": 0.93
+    },
+    {
+     "asset_id": 14,
+     "symbol": "CVX",
+     "asset_class": "STOCK",
+     "value": 90767.6908803,
+     "percent_of_networth": 0.88
+    },
+    {
+     "asset_id": 24,
+     "symbol": "NFLX",
+     "asset_class": "STOCK",
+     "value": 89751.3429204,
+     "percent_of_networth": 0.87
+    },
+    {
+     "asset_id": 15,
+     "symbol": "COP",
+     "asset_class": "STOCK",
+     "value": 79353.3214845,
+     "percent_of_networth": 0.77
+    },
+    {
+     "asset_id": 25,
+     "symbol": "ORCL",
+     "asset_class": "STOCK",
+     "value": 78180.6123,
+     "percent_of_networth": 0.76
+    },
+    {
+     "asset_id": 16,
+     "symbol": "SLB",
+     "asset_class": "STOCK",
+     "value": 49253.785749,
+     "percent_of_networth": 0.48
+    },
+    {
+     "asset_id": 26,
+     "symbol": "PLTR",
+     "asset_class": "STOCK",
+     "value": 46908.36738,
+     "percent_of_networth": 0.46
+    },
+    {
+     "asset_id": null,
+     "symbol": "LINK",
+     "asset_class": "CRYPTO",
+     "value": 45605.357175,
+     "percent_of_networth": 0.44
+    },
+    {
+     "asset_id": null,
+     "symbol": "ARB",
+     "asset_class": "CRYPTO",
+     "value": 32575.255125,
+     "percent_of_networth": 0.32
+    },
+    {
+     "asset_id": null,
+     "symbol": "UNI",
+     "asset_class": "CRYPTO",
+     "value": 26060.2041,
+     "percent_of_networth": 0.25
+    },
+    {
+     "asset_id": null,
+     "symbol": "AAVE",
+     "asset_class": "CRYPTO",
+     "value": 15636.12246,
+     "percent_of_networth": 0.15
+    },
+    {
+     "asset_id": null,
+     "symbol": "MKR",
+     "asset_class": "CRYPTO",
+     "value": 10424.08164,
+     "percent_of_networth": 0.1
+    }
+   ],
+   "basis": "month_end",
+   "view_net_worth": {
+    "total": 10309408.44587646,
+    "cash": 1946357.1435,
+    "stocks_funds": 6536003.26025146,
+    "crypto": 1856789.542125,
+    "liabilities": 29741.5
+   },
+   "net_worth_boundary_at": "2026-11-01T00:00:00+00:00",
+   "currency_exposure": {
+    "total": 10309408.44587646,
+    "items": [
+     {
+      "currency": "USD",
+      "cash": 912107.1435,
+      "stocks_funds": 3960232.40761974,
+      "stablecoins": 508173.97995,
+      "crypto": 0,
+      "liabilities": 0,
+      "value": 5380513.53106974,
+      "percent": 52.19
+     },
+     {
+      "currency": "SGD",
+      "cash": 1034250,
+      "stocks_funds": 1800580,
+      "stablecoins": 0,
+      "crypto": 0,
+      "liabilities": 29741.5,
+      "value": 2805088.5,
+      "percent": 27.21
+     },
+     {
+      "currency": "CRYPTO",
+      "cash": 0,
+      "stocks_funds": 0,
+      "stablecoins": 0,
+      "crypto": 1348615.562175,
+      "liabilities": 0,
+      "value": 1348615.562175,
+      "percent": 13.08
+     },
+     {
+      "currency": "HKD",
+      "cash": 0,
+      "stocks_funds": 775190.85263172,
+      "stablecoins": 0,
+      "crypto": 0,
+      "liabilities": 0,
+      "value": 775190.85263172,
+      "percent": 7.52
+     }
+    ]
+   },
+   "platform_concentration": {
+    "total": 10339149.94587646,
+    "items": [
+     {
+      "platform": "IBKR",
+      "platform_type": "BROKER",
+      "country": "US",
+      "value": 5647530.40375146,
+      "percent": 54.62
+     },
+     {
+      "platform": "CRYPTO",
+      "platform_type": "WALLET_PROVIDER",
+      "country": null,
+      "value": 1856789.542125,
+      "percent": 17.96
+     },
+     {
+      "platform": "DBS_VICKERS",
+      "platform_type": "BROKER",
+      "country": "SG",
+      "value": 1505080,
+      "percent": 14.56
+     },
+     {
+      "platform": "DBS",
+      "platform_type": "BANK",
+      "country": "SG",
+      "value": 689500,
+      "percent": 6.67
+     },
+     {
+      "platform": "OCBC",
+      "platform_type": "BANK",
+      "country": "SG",
+      "value": 344750,
+      "percent": 3.33
+     },
+     {
+      "platform": "UOB",
+      "platform_type": "BANK",
+      "country": "SG",
+      "value": 295500,
+      "percent": 2.86
+     }
+    ]
+   }
   }
  }
 }

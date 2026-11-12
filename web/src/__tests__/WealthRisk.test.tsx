@@ -74,6 +74,41 @@ describe("WealthRisk route", () => {
     expect(screen.getByText(/Stocks S\$ 40,000/)).toBeInTheDocument();
   });
 
+  it("shows how each figure moved vs last month (#409, U18)", async () => {
+    // Last month: AAPL was smaller (20%), MSFT the same, cash 10%.
+    const prior = {
+      ...summaryFixture,
+      net_worth: { total: 100000, cash: 10000, stocks_funds: 75000, crypto: 15000, liabilities: 0 },
+      top_holdings: [
+        { symbol: "AAPL", asset_class: "STOCK", value: 20000, geo: "US", platform: "IBKR" },
+        ...summaryFixture.top_holdings.slice(1),
+      ],
+    } as unknown as RiskSummary;
+    // The page asks for its own month first, then the month before.
+    let current: string | null = null;
+    mockApi.riskSummary.mockImplementation(async (month: string) => {
+      current ??= month;
+      return month === current ? summaryFixture : prior;
+    });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <WealthRisk />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    expect(await screen.findByText("Cash buffer")).toBeInTheDocument();
+    // Both months were asked for: this one and the one before.
+    await waitFor(() => expect(mockApi.riskSummary).toHaveBeenCalledTimes(2));
+    const [first, second] = mockApi.riskSummary.mock.calls.map((call) => call[0]);
+    expect(first).not.toEqual(second);
+    expect(await screen.findByText("+5.0 pts")).toBeInTheDocument(); // cash 15% vs 10%
+    // Largest position and top-5 both rose 2 points (AAPL 22% vs 20%): worse, so flagged.
+    const rises = screen.getAllByText("+2.0 pts");
+    expect(rises.length).toBeGreaterThanOrEqual(2);
+    rises.forEach((el) => expect(el).toHaveClass("bad"));
+  });
+
   it("switches Top 3 / Top 5 concentration via the segmented toggle", async () => {
     const user = userEvent.setup();
     render(

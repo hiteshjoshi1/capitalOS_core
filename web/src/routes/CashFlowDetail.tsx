@@ -22,6 +22,7 @@ import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
 import FxNote from "../components/FxNote";
 import TrendBarChart from "../components/TrendBarChart";
+import { SavingsRateTrend, YearOverYearSection } from "../components/CashFlowYearOverYear";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
@@ -600,6 +601,8 @@ function OverviewTab({
         )}
       </section>
 
+      <SavingsRateTrend trend={detail.analytics.savings_rate_trend} month={detail.month} />
+
       <section>
         <div className="cashFlowSectionHeading">
           <p className="wealthEyebrow">What changed</p>
@@ -775,6 +778,8 @@ function ExpensesTab({
           <DriverRows items={period.outflowCategoryDeltas} formatMoney={formatMoney} />
         </div>
       </section>
+
+      <YearOverYearSection yoy={detail.analytics.year_over_year} formatMoney={formatMoney} />
 
       <TransactionListSection
         title={`Expense transactions (${detail.expenses.transaction_count})`}

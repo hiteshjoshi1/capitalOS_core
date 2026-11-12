@@ -4147,6 +4147,8 @@
       "assumed_tax_rate": 0.0,
       "base_currency": "SGD",
       "companies": [],
+      "companies_by_past_payments": 0,
+      "companies_by_yield": 0,
       "country_tax_rates": {},
       "from_month": "2026-03",
       "holdings_considered": 4,
@@ -4517,6 +4519,104 @@
         ],
         "prior_month": "2026-01",
         "prior_month_net": 4528.0,
+        "savings_rate_trend": [
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-03",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-04",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-05",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-06",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-07",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-08",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-09",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-10",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-11",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": 0.0,
+            "inflows": 8000.0,
+            "month": "2025-12",
+            "net": 8000.0,
+            "outflows": 0.0,
+            "savings_rate": 1.0
+          },
+          {
+            "burn_rate": 0.434,
+            "inflows": 8000.0,
+            "month": "2026-01",
+            "net": 4528.0,
+            "outflows": 3472.0,
+            "savings_rate": 0.566
+          },
+          {
+            "burn_rate": 0.3671,
+            "inflows": 10367.5539,
+            "month": "2026-02",
+            "net": 6561.4348,
+            "outflows": 3806.119,
+            "savings_rate": 0.6329
+          }
+        ],
         "top_outflow_merchants": [
           {
             "amount": 2500.0,
@@ -4611,6 +4711,57 @@
           "span_start": "2026-01-30",
           "starting_cash": 56706.9641,
           "transfers_and_funding": 1000.0
+        },
+        "year_over_year": {
+          "basis": "full_month",
+          "has_prior_year_data": false,
+          "inflows": 10367.5539,
+          "month": "2026-02",
+          "net": 6561.4348,
+          "outflow_category_deltas": [
+            {
+              "current_amount": 2500.0,
+              "delta_amount": 2500.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Rent",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 1210.4,
+              "delta_amount": 1210.4,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Shopping",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 95.0,
+              "delta_amount": 95.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Dining",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 0.719,
+              "delta_amount": 0.719,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Withholding tax",
+              "prior_amount": 0.0
+            }
+          ],
+          "outflows": 3806.119,
+          "prior_end": "2025-02-28",
+          "prior_inflows": 0.0,
+          "prior_net": 0.0,
+          "prior_outflows": 0.0,
+          "prior_savings_rate": null,
+          "prior_start": "2025-02-01",
+          "prior_year_month": "2025-02",
+          "savings_rate": 0.6329,
+          "through_day": 28
         }
       },
       "base_currency": "SGD",
@@ -5048,6 +5199,104 @@
         ],
         "prior_month": "2026-02",
         "prior_month_net": 6561.4348,
+        "savings_rate_trend": [
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-04",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-05",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-06",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-07",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-08",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-09",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-10",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-11",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": 0.0,
+            "inflows": 8000.0,
+            "month": "2025-12",
+            "net": 8000.0,
+            "outflows": 0.0,
+            "savings_rate": 1.0
+          },
+          {
+            "burn_rate": 0.434,
+            "inflows": 8000.0,
+            "month": "2026-01",
+            "net": 4528.0,
+            "outflows": 3472.0,
+            "savings_rate": 0.566
+          },
+          {
+            "burn_rate": 0.3671,
+            "inflows": 10367.5539,
+            "month": "2026-02",
+            "net": 6561.4348,
+            "outflows": 3806.119,
+            "savings_rate": 0.6329
+          },
+          {
+            "burn_rate": 8.5101,
+            "inflows": 455.0885,
+            "month": "2026-03",
+            "net": -3417.7656,
+            "outflows": 3872.8541,
+            "savings_rate": -7.5101
+          }
+        ],
         "top_outflow_merchants": [
           {
             "amount": 2500.0,
@@ -5142,6 +5391,49 @@
           "span_start": "2026-02-27",
           "starting_cash": 61000.8589,
           "transfers_and_funding": 0.0
+        },
+        "year_over_year": {
+          "basis": "month_to_date",
+          "has_prior_year_data": false,
+          "inflows": 455.0885,
+          "month": "2026-03",
+          "net": -3417.7656,
+          "outflow_category_deltas": [
+            {
+              "current_amount": 2500.0,
+              "delta_amount": 2500.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Rent",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 712.8541,
+              "delta_amount": 712.8541,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Travel",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 660.0,
+              "delta_amount": 660.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Groceries",
+              "prior_amount": 0.0
+            }
+          ],
+          "outflows": 3872.8541,
+          "prior_end": "2025-03-18",
+          "prior_inflows": 0.0,
+          "prior_net": 0.0,
+          "prior_outflows": 0.0,
+          "prior_savings_rate": null,
+          "prior_start": "2025-03-01",
+          "prior_year_month": "2025-03",
+          "savings_rate": -7.5101,
+          "through_day": 18
         }
       },
       "base_currency": "SGD",

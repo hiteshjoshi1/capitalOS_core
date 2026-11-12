@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.fx import FxStatusFields
 
@@ -140,6 +140,36 @@ class CashFlowComparisonOut(BaseModel):
     deterioration_drivers: list[CashFlowCategoryDeltaItem]
 
 
+class CashFlowYearOverYearOut(BaseModel):
+    """The month against the same month a year earlier, like for like (#409, U15, D-113).
+
+    Seasonal spending (school fees, insurance, holidays) needs last year's same month, not last
+    month. The open month is month to date: days 1..``through_day`` against the same days of
+    last year's month (clamped to its length, so 29 Feb vs 28 Feb). Own-account transfers and
+    card payments are left out exactly as for the month itself (D-85, D-77).
+    """
+
+    basis: str  # "month_to_date" | "full_month"
+    month: str
+    prior_year_month: str
+    through_day: int
+    prior_start: str  # ISO date, first day counted
+    prior_end: str  # ISO date, last day counted (inclusive)
+    # False when nothing at all is recorded for last year's month: the deltas then mean "no
+    # data", not "spent nothing", and the UI says so.
+    has_prior_year_data: bool
+    inflows: float
+    outflows: float
+    net: float
+    savings_rate: float | None
+    prior_inflows: float
+    prior_outflows: float
+    prior_net: float
+    prior_savings_rate: float | None
+    # Every outflow category of either month, biggest increase first (both directions).
+    outflow_category_deltas: list[CashFlowCategoryDeltaItem]
+
+
 class CashFlowAnalyticsOut(BaseModel):
     burn_rate: float | None
     prior_month: str | None
@@ -159,6 +189,10 @@ class CashFlowAnalyticsOut(BaseModel):
     waterfall: CashFlowWaterfallOut
     answers: list[CashFlowDiagnosticAnswer]
     comparison: CashFlowComparisonOut | None = None
+    # #409 (U15): the same month last year, and the savings rate for the twelve months ending at
+    # the month (oldest first; a month with no income has savings_rate None).
+    year_over_year: CashFlowYearOverYearOut | None = None
+    savings_rate_trend: list[CashFlowTrendPoint] = Field(default_factory=list)
 
 
 class CashFlowDetailOut(FxStatusFields):
