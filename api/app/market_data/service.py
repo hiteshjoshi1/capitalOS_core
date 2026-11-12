@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
 from app.core.clock import app_today
+from app.market_data.dividend_events import refresh_dividend_events_for_exchange
 from app.market_data.providers import (
     YAHOO_QUALIFIED_SUFFIXES,
     EODHDProvider,
@@ -1535,6 +1536,13 @@ def run_exchange_refresh(
         symbols=all_symbols,
         yfinance=yfinance,
     )
+    # #417 (D-117): the dividend calendar's events (past dividends, next listed ex-date).
+    dividend_events_upserted = refresh_dividend_events_for_exchange(
+        db,
+        exchange_code=exchange_code,
+        symbols=all_symbols,
+        yfinance=yfinance,
+    )
 
     diagnostics = _exchange_diagnostics(
         db,
@@ -1551,6 +1559,7 @@ def run_exchange_refresh(
         "total_active_symbols": len(all_symbols),
         "upserted_rows": total_upserted,
         "dividend_rows_upserted": dividend_rows_upserted,
+        "dividend_events_upserted": dividend_events_upserted,
         "missing_symbols": len(unresolved) + total_invalid,
         "backfilled_symbols": backfilled_symbols,
         "status": (

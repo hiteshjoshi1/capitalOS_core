@@ -14,10 +14,14 @@ from app.market_data.service import YAHOO_QUALIFIED_SUFFIXES, YAHOO_SUFFIX
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
 from app.valuation import clock as valuation_clock
 # The holdings' market value under the dashboard's price rule (D-21, #144), from the valuation service.
-from app.valuation.money import floats
+from app.valuation.money import D, floats
+from app.portfolio.dividend_calendar import PastDividend, add_months as calendar_add_months, upcoming_dividends
 from app.valuation.prices import _asset_market_values as _latest_asset_market_values
 from app.portfolio.ledger_dividends import fetch_ledger_dividend_rows, ledger_covered_since
 from app.schemas.dividends import (
+    DividendCalendarEventOut,
+    DividendCalendarMonthOut,
+    DividendCalendarOut,
     DividendCompanyItemOut,
     DividendHistoryEventOut,
     DividendHistoryOut,
@@ -943,4 +947,210 @@ def expected_dividends_overview(
         companies=companies,
         companies_by_yield=sum(1 for c in companies if c.method == "yield"),
         companies_by_past_payments=sum(1 for c in companies if c.method == "past_payments"),
+    )
+
+
+# ---- #417 (U17, D-117): dividend calendar for the coming months ----
+
+def _calendar_events_by_asset(
+    db: Session, asset_ids: set[int]
+) -> tuple[dict[int, list[PastDividend]], dict[int, tuple[date, date | None]], dict[int, str], str | None]:
+    """Per asset: past dividends, the next listed ex-date (and pay date), the events' currency;
+    and the newest fetch time behind them."""
+    if not asset_ids:
+        return {}, {}, {}, None
+    rows = db.execute(
+        text(
+            f"""
+            SELECT asset_id, kind, ex_date, pay_date, amount_per_share, currency, fetched_at
+            FROM market_dividend_events
+            WHERE asset_id IN ({_int_list_sql(asset_ids)})
+            ORDER BY asset_id ASC, ex_date ASC
+            """
+        )
+    ).mappings().all()
+    history: dict[int, list[PastDividend]] = {}
+    announced: dict[int, tuple[date, date | None]] = {}
+    currency: dict[int, str] = {}
+    newest: str | None = None
+    for row in rows:
+        asset_id = int(row["asset_id"])
+        fetched = row.get("fetched_at")
+        fetched_iso = fetched.isoformat() if hasattr(fetched, "isoformat") else (str(fetched) if fetched else None)
+        if fetched_iso and (newest is None or fetched_iso > newest):
+            newest = fetched_iso
+        ex_date = _as_date(row.get("ex_date"))
+        if ex_date is None:
+            continue
+        currency.setdefault(asset_id, (row.get("currency") or "").upper())
+        if row["kind"] == "announced":
+            current = announced.get(asset_id)
+            if current is None or ex_date > current[0]:
+                announced[asset_id] = (ex_date, _as_date(row.get("pay_date")))
+            continue
+        amount = row.get("amount_per_share")
+        if amount is None:
+            continue
+        value = D(amount)
+        if value > 0:
+            history.setdefault(asset_id, []).append(PastDividend(ex_date, value))
+    return history, announced, currency, newest
+
+
+def _as_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+@router.get("/calendar", response_model=DividendCalendarOut)
+def dividend_calendar(
+    base_currency: str = Query("SGD"),
+    months: int = Query(3, ge=1, le=12),
+    as_of: str | None = Query(None, description="Start date (YYYY-MM-DD); default today"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """The dividends current holdings are expected to pay over the next `months` months (#417)."""
+    base = base_currency.strip().upper()
+    if as_of:
+        try:
+            start = date.fromisoformat(as_of)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="as_of must be YYYY-MM-DD")
+    else:
+        start = valuation_clock._app_today()
+    end = calendar_add_months(start, months) - timedelta(days=1)
+    anchor = datetime.combine(start + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+    holdings = _load_expected_holdings(db, anchor, current_user.id)
+    shares_by_asset = _quantities_on_date(db, holdings, start, current_user.id) if holdings else {}
+    held = [h for h in holdings if shares_by_asset.get(int(h["asset_id"]), 0.0) > 0]
+    held_ids = {int(h["asset_id"]) for h in held}
+    history, announced, event_currency, newest = _calendar_events_by_asset(db, held_ids)
+
+    raw: list[dict[str, Any]] = []
+    with_events: set[int] = set()
+    no_provider_data: set[int] = set()
+    for holding in held:
+        asset_id = int(holding["asset_id"])
+        past = history.get(asset_id, [])
+        listed = announced.get(asset_id)
+        if not past and listed is None:
+            no_provider_data.add(asset_id)
+            continue
+        shares = D(shares_by_asset.get(asset_id, 0.0))
+        ccy = event_currency.get(asset_id) or (holding.get("quote_currency") or "USD").upper()
+        for item in upcoming_dividends(past, listed, start=start, end=end):
+            if item.amount_per_share is None:
+                continue
+            with_events.add(asset_id)
+            land = item.pay_date if item.pay_date and item.pay_date <= end else item.ex_date
+            raw.append(
+                {
+                    "holding": holding,
+                    "date": land,
+                    "ex_date": item.ex_date,
+                    "pay_date": item.pay_date,
+                    "shares": shares,
+                    "amount_per_share": item.amount_per_share,
+                    "currency": ccy,
+                    "amount": shares * item.amount_per_share,
+                    "basis": item.basis,
+                }
+            )
+
+    # Holdings the provider has nothing on: what they paid you a year back, a year on.
+    if no_provider_data:
+        year_back_start = datetime.combine(calendar_add_months(start, -12), datetime.min.time(), tzinfo=timezone.utc)
+        year_back_end = datetime.combine(end - timedelta(days=364), datetime.min.time(), tzinfo=timezone.utc)
+        by_id = {int(h["asset_id"]): h for h in held}
+        for row in _fetch_dividend_rows(db, year_back_start, year_back_end, current_user.id):
+            if row.get("asset_id") is None or int(row["asset_id"]) not in no_provider_data:
+                continue
+            if not _looks_like_dividend_income(row):
+                continue
+            paid = _row_ts(row["ts"]).date()
+            land = calendar_add_months(paid, 12)
+            if not (start <= land <= end):
+                continue
+            amount = D(row.get("amount") or 0)
+            if amount <= 0:
+                continue
+            asset_id = int(row["asset_id"])
+            with_events.add(asset_id)
+            raw.append(
+                {
+                    "holding": by_id[asset_id],
+                    "date": land,
+                    "ex_date": None,
+                    "pay_date": None,
+                    "shares": D(shares_by_asset.get(asset_id, 0.0)),
+                    "amount_per_share": None,
+                    "currency": (row.get("currency") or base).upper(),
+                    "amount": amount,
+                    "basis": "your_payments",
+                }
+            )
+
+    currencies = {r["currency"] for r in raw}
+    rates = get_rates(start, base, currencies) if currencies else {}
+    events: list[DividendCalendarEventOut] = []
+    month_totals: dict[str, list[Any]] = {}
+    total = D(0)
+    for r in sorted(raw, key=lambda x: (x["date"], str(x["holding"]["symbol"]))):
+        rate = rates.get(r["currency"]) if r["currency"] != base else 1.0
+        amount_base = r["amount"] * D(rate) if rate is not None else None
+        if amount_base is not None:
+            total += amount_base
+            bucket = month_totals.setdefault(r["date"].strftime("%Y-%m"), [D(0), 0])
+            bucket[0] += amount_base
+            bucket[1] += 1
+        events.append(
+            DividendCalendarEventOut(
+                asset_id=int(r["holding"]["asset_id"]),
+                symbol=str(r["holding"]["symbol"]),
+                company=str(r["holding"]["company"]),
+                date=r["date"].isoformat(),
+                ex_date=r["ex_date"].isoformat() if r["ex_date"] else None,
+                pay_date=r["pay_date"].isoformat() if r["pay_date"] else None,
+                shares=float(r["shares"]),
+                amount_per_share=float(r["amount_per_share"]) if r["amount_per_share"] is not None else None,
+                currency=r["currency"],
+                amount=float(r["amount"]),
+                amount_base=float(amount_base) if amount_base is not None else None,
+                basis=r["basis"],
+            )
+        )
+    month_keys = []
+    cursor = date(start.year, start.month, 1)
+    while cursor <= end:
+        month_keys.append(cursor.strftime("%Y-%m"))
+        cursor = calendar_add_months(cursor, 1)
+    return DividendCalendarOut(
+        base_currency=base,
+        from_date=start.isoformat(),
+        to_date=end.isoformat(),
+        events=events,
+        months=[
+            DividendCalendarMonthOut(
+                month=key,
+                amount_base=float(month_totals.get(key, [D(0), 0])[0]),
+                count=int(month_totals.get(key, [D(0), 0])[1]),
+            )
+            for key in month_keys
+        ],
+        total_base=float(total),
+        holdings_considered=len(held),
+        holdings_with_events=len(with_events),
+        holdings_without_data=len(held) - len(with_events),
+        holdings_no_dividend_history=len(no_provider_data - with_events),
+        data_as_of=newest,
     )

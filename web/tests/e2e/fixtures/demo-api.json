@@ -10945,5 +10945,58 @@
     ]
    }
   }
+ },
+ "/dividends/calendar?base_currency=SGD&months=3": {
+  "status": 200,
+  "body": {
+   "base_currency": "SGD",
+   "from_date": "2026-11-12",
+   "to_date": "2027-02-11",
+   "events": [
+    {
+     "asset_id": 29,
+     "symbol": "D05",
+     "company": "DBS Group Holdings Ltd.",
+     "date": "2027-02-06",
+     "ex_date": null,
+     "pay_date": null,
+     "shares": 18000,
+     "amount_per_share": null,
+     "currency": "SGD",
+     "amount": 5200,
+     "amount_base": 5200,
+     "basis": "your_payments",
+     "estimated": true
+    }
+   ],
+   "months": [
+    {
+     "month": "2026-11",
+     "amount_base": 0,
+     "count": 0
+    },
+    {
+     "month": "2026-12",
+     "amount_base": 0,
+     "count": 0
+    },
+    {
+     "month": "2027-01",
+     "amount_base": 0,
+     "count": 0
+    },
+    {
+     "month": "2027-02",
+     "amount_base": 5200,
+     "count": 1
+    }
+   ],
+   "total_base": 5200,
+   "holdings_considered": 33,
+   "holdings_with_events": 1,
+   "holdings_without_data": 32,
+   "holdings_no_dividend_history": 32,
+   "data_as_of": null
+  }
  }
 }
