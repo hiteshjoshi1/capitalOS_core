@@ -10,6 +10,7 @@ import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
 import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
+import "./WealthOverview.css";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import { useBaseCurrency } from "../context/CurrencyContext";

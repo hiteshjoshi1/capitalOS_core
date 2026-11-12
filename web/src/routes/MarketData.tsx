@@ -7,6 +7,7 @@ import { useAuth } from "../context/useAuth";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import "../App.css";
+import "./MarketData.css";
 import * as fmt from "../lib/format";
 import LoadError from "../components/LoadError";
 

@@ -17,6 +17,7 @@ import { DeltaArrow } from "../components/Delta";
 import { cashBridgeSpanText } from "../lib/cashBridge";
 import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
+import "./CashFlowDetail.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";

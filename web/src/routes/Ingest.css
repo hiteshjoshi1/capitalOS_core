@@ -1,0 +1,134 @@
+/* Moved from App.css (#368): rules only Ingest.tsx uses. */
+/* ── Import Statements: dropzone + report chips/preview ── */
+
+.ingestDropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  border: 1.5px dashed var(--line);
+  border-radius: 14px;
+  padding: 34px 20px;
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.ingestDropzoneActive {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel) 92%);
+}
+
+.ingestDropzoneTitle {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ingestDropzoneHint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.ingestDropzoneInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ingestStatChips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.ingestWarningStack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.ingestWarningBanner {
+  color: var(--text);
+}
+
+.ingestWarningDotIcon {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--warn);
+  flex-shrink: 0;
+}
+
+.ingestPreview {
+  margin-top: 8px;
+}
+
+.ingestPreviewTitle {
+  margin: 0;
+  padding: 13px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ingestPreviewDate {
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 50px;
+  flex-shrink: 0;
+}
+
+.ingestPreviewMerchant {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingestPreviewAmount {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ingestJobRow {
+  cursor: pointer;
+}
+
+.btnDanger {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line) 55%);
+}
+
+.btnDanger:hover {
+  border-color: var(--bad);
+}
+
+@media (max-width: 640px) {
+
+  .ingestPreviewMerchant {
+    white-space: normal;
+  }
+}
+
+/* #410 (U28): what an upload changed, under the report counts. */
+.ingestEffect {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}

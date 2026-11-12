@@ -1,0 +1,13 @@
+/* Moved from App.css (#368): rules only CashOverview.tsx uses. */
+/* #397 (U13, U14): the Cash page's per-account table and FX revaluation. */
+.cashAccountsNote {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.cashAccountValue {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}

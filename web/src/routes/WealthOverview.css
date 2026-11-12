@@ -1,0 +1,367 @@
+/* Moved from App.css (#368): rules only WealthOverview.tsx uses. */
+/* #223: a past month on Overview is a month-end snapshot, said in the hero (in the
+   #127 "Past month" callout's colour), with a way back to the live month. */
+.coHeroPastMonth {
+  margin: 10px 0 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.coHeroBackToLive {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Per-source freshness chips — replaces a single "As of ..." line so each
+   source's own staleness is visible instead of averaged away. */
+.coFreshnessRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.coFreshnessChip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: default;
+}
+
+.coFreshnessTooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 210px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  pointer-events: none;
+}
+
+.coFreshnessChip:hover .coFreshnessTooltip,
+.coFreshnessChip:focus-visible .coFreshnessTooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+@media (max-width: 980px) {
+  .coFreshnessChip:not(:hover):not(:focus-visible) .coFreshnessTooltip {
+    display: none;
+  }
+
+  .coFreshnessTooltip {
+    max-width: calc(100vw - 36px);
+  }
+}
+
+.coFreshnessTooltipRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.coFreshnessChipCarried {
+  border-style: dashed;
+}
+
+.coFreshnessDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* Entry point into the Wealth Timeline History page */
+.coHeroHistoryTeaser {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.14s ease;
+}
+
+.coHeroHistoryTeaser:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* #249: holdings the since-update delta compares with an older statement price */
+.coHeroDeltaNote {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ─── Allocation card ────────────────────────────────────────────── */
+
+.coAllocationCard {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
+  box-shadow: 0 22px 48px var(--shadow);
+}
+
+.coAllocationDonut {
+  width: 220px;
+  height: 220px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.coAllocationInner {
+  width: 140px;
+  height: 140px;
+  border-radius: 999px;
+  background: var(--panel2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.coAllocationTotalLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coAllocationTotalValue {
+  font-size: 17px;
+  font-weight: 800;
+  margin-top: 2px;
+  color: var(--text);
+}
+
+.coAllocationLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* #232: gross assets − liabilities = the headline, under the donut legend. */
+.coAllocationNetLine {
+  margin: 4px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.coAllocationRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.coAllocationRowLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.coAllocationDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.coAllocationName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.coAllocationRowRight {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.coAllocationValue {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.coAllocationPct {
+  font-size: 14px;
+  font-weight: 700;
+  width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* ─── Signals section ────────────────────────────────────────────── */
+
+.coSignalsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.coSignalCard {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
+  box-shadow: 0 14px 30px var(--shadow);
+}
+
+.coSignalValue {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.coSignalMeta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ─── Holdings card ──────────────────────────────────────────────── */
+
+.coHoldingsCard {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
+  box-shadow: 0 14px 30px var(--shadow);
+}
+
+.coHoldingsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.coHoldingsTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+/* #249: what "Today" compares with, under its movers */
+.coHoldingsNote {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+
+  /* Signals stack on mobile (#239). They were a sideways scroller whose first card grew
+     to its longest line, which pushed the Liabilities card out of sight. */
+  .coSignalsGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  /* Allocation card: stack donut above legend */
+  .coAllocationCard {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+}
+
+@media (max-width: 680px) {
+
+  /* Donut: match reference 170×170 / inner 108×108 */
+  .coAllocationDonut {
+    width: 170px;
+    height: 170px;
+  }
+
+  .coAllocationInner {
+    width: 108px;
+    height: 108px;
+  }
+
+  .coAllocationTotalValue {
+    font-size: 14px;
+  }
+
+  /* Holdings card less padding */
+  .coHoldingsCard, .coSignalCard {
+    padding: 18px;
+  }
+}
+@media (max-width: 600px) {
+  .coAllocViewControl {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-radius: 16px;
+    width: 100%;
+  }
+}

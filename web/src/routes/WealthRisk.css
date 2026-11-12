@@ -1,0 +1,92 @@
+/* Moved from App.css (#368): rules only WealthRisk.tsx uses. */
+.riskChartList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.riskChartRow {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(120px, 2fr) 64px;
+  align-items: center;
+  gap: 18px;
+  padding: 15px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
+}
+
+.riskChartRow:last-child {
+  border-bottom: none;
+}
+
+.riskChartIdentity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.riskChartSymbol {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.riskChartMeta {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.riskChartTrack {
+  border-radius: 999px;
+  height: 8px;
+  background: color-mix(in srgb, var(--line) 54%, transparent 46%);
+  overflow: hidden;
+}
+
+.riskChartFill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 68%, white 32%));
+  border-radius: inherit;
+}
+
+.riskChartPercent {
+  text-align: right;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.riskPositionsCard {
+  padding: 10px 24px;
+}
+
+@media (max-width: 620px) {
+  .riskPositionsCard {
+    padding: 12px 16px 18px;
+  }
+
+  .riskChartRow {
+    grid-template-columns: minmax(0, 1fr) 56px;
+    gap: 8px 12px;
+  }
+}
+
+.riskThresholdRule {
+  margin-top: 6px;
+}
+
+/* #409 (U18): a risk figure's move vs last month. */
+.riskChangeLine {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.riskNoData {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}

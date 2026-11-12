@@ -4,6 +4,7 @@ import { api, UploadRefusedError } from "../lib/api";
 import type { Account, ImportJobListItem, UploadDetect, UploadRefusal } from "../lib/api";
 import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
+import "./Ingest.css";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import { isIsoDate, uploadExpectationLine } from "../lib/sourceFreshness";

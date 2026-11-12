@@ -11,6 +11,7 @@ import { deltaDirection, deltaPercent, noDataFor } from "../lib/delta";
 import { hasLivePrice, holdingPriceAge } from "../lib/priceAge";
 import { holdingPnlBase } from "../lib/holdingPnl";
 import "../App.css";
+import "./StockHoldings.css";
 import Delta, { DeltaArrow } from "../components/Delta";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthBar from "../components/MonthBar";

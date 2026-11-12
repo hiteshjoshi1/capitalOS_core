@@ -7,6 +7,7 @@ import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
 import { expectedMethodText, projectedHoldingCount } from "../lib/dividendProjection";
 import "../App.css";
+import "./Dividends.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";

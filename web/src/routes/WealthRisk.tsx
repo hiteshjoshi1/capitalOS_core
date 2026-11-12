@@ -24,6 +24,7 @@ import {
   type TopN,
 } from "../lib/risk";
 import "../App.css";
+import "./WealthRisk.css";
 import GeographyPieCard from "../components/dashboard/GeographyPieCard";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";

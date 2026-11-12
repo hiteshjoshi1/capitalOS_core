@@ -1,0 +1,162 @@
+/* Moved from App.css (#368): rules only MarketData.tsx uses. */
+/* ── Market Data: status chips + expandable exchange rows ── */
+
+.marketDataStatusChips {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.marketDataExchange {
+  border-bottom: 1px solid var(--line);
+}
+
+.marketDataExchange:last-child {
+  border-bottom: none;
+}
+
+.marketDataExchangeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+
+.marketDataExchangeMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.marketDataExchangeSummary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.marketDataChevron {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.marketDataSymbolList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 14px 8px;
+}
+
+.marketDataSymbolRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.marketDataSymbolCode {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  width: 60px;
+}
+
+.marketDataSymbolMeta {
+  flex: 1;
+  min-width: 120px;
+}
+
+.marketDataRunsTableWrap {
+  overflow-x: auto;
+}
+
+.marketDataRunsTable {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.marketDataRunsTable th,
+.marketDataRunsTable td {
+  padding: 12px 16px 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.marketDataRunsTable th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.marketDataRunsTable td {
+  font-size: 13px;
+}
+
+.marketDataRunsTable th:nth-child(1),
+.marketDataRunsTable td:nth-child(1) {
+  width: 28%;
+}
+
+.marketDataRunsTable th:nth-child(2),
+.marketDataRunsTable td:nth-child(2) {
+  width: 14%;
+}
+
+.marketDataRunsTable th:nth-child(3),
+.marketDataRunsTable td:nth-child(3) {
+  width: 24%;
+}
+
+.marketDataRunsTable th:nth-child(4),
+.marketDataRunsTable td:nth-child(4) {
+  width: 18%;
+}
+
+.marketDataRunsTable th:nth-child(5),
+.marketDataRunsTable td:nth-child(5) {
+  width: 16%;
+}
+
+.marketDataRunsTable th:last-child,
+.marketDataRunsTable td:last-child {
+  padding-right: 0;
+}
+
+.marketDataRunsTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.marketDataRunStarted,
+.marketDataRunProvider,
+.marketDataRunCounts {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marketDataRunCounts {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Market data: action bar and "Needs a fix" (#320) ──────────────── */
+.marketDataActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 16px;
+}
