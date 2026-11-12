@@ -3,7 +3,7 @@ export const BRIDGE_LINKS: Record<string, { to: string; label: string }> = {
   new_money: { to: "/cash", label: "Open cash" },
   markets: { to: "/holdings", label: "Open holdings" },
   fx: { to: "/cash", label: "Open cash by currency" },
-  dividends_interest: { to: "/income", label: "Open income" },
+  dividends_interest: { to: "/income", label: "Open dividends" },
   cash_kept: { to: "/cash-flow", label: "Open cash flow" },
   catch_up: { to: "/operations", label: "Open Data Hub" },
   // No /crypto/wallets page: wallets and accounts are listed in Accounts & sources (#319).

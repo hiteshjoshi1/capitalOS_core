@@ -144,7 +144,7 @@ describe("Dividends", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Income" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dividends" })).toBeInTheDocument();
     expect(await screen.findByText("DIVIDENDS THIS MONTH")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "What's received vs. what's ahead" })).toBeInTheDocument();
     expect(screen.getByText("Expected, next 12 months")).toBeInTheDocument();
