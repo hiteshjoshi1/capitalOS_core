@@ -35,7 +35,7 @@ platformdirs==4.13.5
 pycparser==3.12
 python-dateutil==2.9.0.post0
 pytz==2026.5
-soupsieve==3.0.4
+soupsieve==4.0
 starlette==1.10.0
 tzdata==2026.5
 tzlocal==5.4.5
