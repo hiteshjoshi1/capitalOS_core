@@ -16,8 +16,9 @@ export type DeltaProps = {
   /** What to print (default both: `+S$ 1,234 (+3.1%)`). `pct` falls back to the amount when there is no %. */
   show?: "both" | "abs" | "pct";
   variant?: "inline" | "chip";
-  /** `inverse` when up is bad (spending): the arrow follows the direction, the colour follows good/bad. */
-  tone?: "normal" | "inverse";
+  /** `inverse` when up is bad (spending): the arrow follows the direction, the colour follows good/bad.
+   *  `neutral` when neither direction is good news (Unexplained, #443 V7): the amber caution colour both ways. */
+  tone?: "normal" | "inverse" | "neutral";
   decimals?: number;
   className?: string;
 };
@@ -78,7 +79,13 @@ export default function Delta({
     show === "abs" ? money : show === "pct" ? (pctText ?? money) : pctText ? `${money} (${pctText})` : money;
   // The colour class: "up" is the good colour. Inverse tone (spending) flips it.
   const colour =
-    direction === "flat" ? "delta--flat" : (direction === "up") === (tone === "normal") ? "delta--up" : "delta--down";
+    direction === "flat"
+      ? "delta--flat"
+      : tone === "neutral"
+        ? "delta--neutral"
+        : (direction === "up") === (tone === "normal")
+          ? "delta--up"
+          : "delta--down";
 
   return (
     <span className={[...classes, colour].filter(Boolean).join(" ")} data-direction={direction}>
