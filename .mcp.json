@@ -2,10 +2,9 @@
   "mcpServers": {
     "capitalos-postgres": {
       "command": "bash",
-      "args": ["scripts/mcp-postgres.sh"],
-      "env": {
-        "MCP_PG_NETWORK": "capitalos_default"
-      }
+      "args": [
+        "scripts/mcp-postgres.sh"
+      ]
     }
   }
 }

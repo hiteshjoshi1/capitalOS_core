@@ -253,6 +253,22 @@ where:
 	@$(if $(filter worktree,$(CHECKOUT)),echo "web:      http://localhost:$(ISO_WEB_PORT)   postgres: 127.0.0.1:$(ISO_PG_PORT)   grafana: :$(ISO_GRAFANA_PORT)",true)
 	@echo "runtimes: node $$(node --version) ($(if $(wildcard $(CAPITALOS_NODE_BIN)/node),CapitalOS,PATH: run make host-tools))   python $$($(PYTHON) -c 'import platform; print(platform.python_version())') ($(if $(CAPITALOS_PYTHON),CapitalOS,PATH: run make host-tools))"
 
+# The database container this checkout drives; scripts/mcp-postgres.sh takes the MCP's network
+# from it (#442).
+.PHONY: print-db-container mcp-check
+print-db-container:
+	@echo $(DB_CONTAINER)
+
+# The read-only Postgres MCP answers (#442): initialize, then one SELECT through scripts/mcp-postgres.sh.
+mcp-check:
+	@scripts/mcp-check.sh
+
+# #442 (review #431 R2): .env 600; data/, state/, backups/, the backup folder and ~/.capitalos 700.
+# Dry run by default; APPLY=1 changes them. make status and make deploy warn when they drift.
+.PHONY: secure-perms
+secure-perms:
+	@$(if $(filter 1,$(APPLY)),scripts/secure-perms.sh apply,DRY_RUN=1 scripts/secure-perms.sh apply)
+
 # Installs the host runtimes above (#91). nvm rewrites its lts/* aliases when it installs an LTS
 # release, which would move every other project's default; they're saved and put back.
 .PHONY: host-tools
@@ -769,6 +785,7 @@ lint: web-deps
 	scripts/test-checkout-guard.sh
 	scripts/test-db-backup.sh
 	scripts/test-backup-schedule.sh
+	scripts/test-secure-perms.sh
 	scripts/test-test-instance.sh
 	scripts/test-worktree-prune.sh
 	scripts/test-pretooluse-guard.sh
