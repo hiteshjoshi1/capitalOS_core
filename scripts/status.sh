@@ -19,12 +19,14 @@ make -s where 2>/dev/null | sed 's/^/  /'
 
 # The real-data stack: health of what runs, and how far main's checkout is from origin/main.
 if docker info >/dev/null 2>&1; then
-  running=$(docker ps --filter name=capitalos-oss --filter name=capitalos-web --filter name=capitalos-loki \
-    --filter name=capitalos-grafana --filter name=capitalos-alloy --filter name=capitalos-docker-socket-proxy \
-    --format '{{.Names}}' | wc -l | tr -d ' ')
+  # Core: postgres, api, web. Observability (Loki, Grafana, Alloy, socket proxy) is optional
+  # (#442): counted separately, so "3/7" no longer reads like a failure when it's simply off.
+  core=$(docker ps --filter name=capitalos-oss --filter name=capitalos-web --format '{{.Names}}' | wc -l | tr -d ' ')
+  obs=$(docker ps --filter name=capitalos-loki --filter name=capitalos-grafana --filter name=capitalos-alloy \
+    --filter name=capitalos-docker-socket-proxy --format '{{.Names}}' | wc -l | tr -d ' ')
   api=$(curl -s -m 2 http://127.0.0.1:8011/health 2>/dev/null | grep -q '"ok"' && echo ok || echo DOWN)
   web=$(curl -s -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:5173/ 2>/dev/null | grep -q 200 && echo ok || echo DOWN)
-  echo "Real stack: API $api, web $web, $running/7 containers up"
+  echo "Real stack: API $api, web $web, $core/3 core containers up, observability $([ "$obs" -gt 0 ] && echo "$obs/4 up" || echo "off (make observability-up)")"
 else
   echo "Real stack: Docker not running"
 fi
@@ -43,6 +45,8 @@ if [ -n "$newest" ]; then
 else
   echo "Backup:     NO verified backup (make db-backup)"
 fi
+# #442: secrets and raw statements stay owner-only.
+perm=$("$(dirname "$0")/secure-perms.sh" check 2>/dev/null) || echo "Perms:      ${perm//$'\n'/; }"
 
 # Worktrees and the test instance.
 wts=$(git worktree list --porcelain | sed -n 's#^worktree ##p' | grep -v -x "$MAIN" | sed "s#.*/##" | tr '\n' ' ')

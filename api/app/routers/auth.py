@@ -83,9 +83,25 @@ def _cookie_samesite() -> str:
     }.get(raw, "Strict")
 
 
-def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+def _request_is_https(request: Request | None) -> bool:
+    """Whether the browser reached us over HTTPS (#442, D-119): the request itself, or the scheme
+    the web container's nginx forwards. nginx only says https for a *.ts.net host, which can only
+    come through `tailscale serve` (the container is bound to 127.0.0.1)."""
+    if request is None:
+        return False
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return forwarded == "https"
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str, request: Request | None = None) -> None:
     ttl = refresh_token_ttl_seconds()
-    secure = os.getenv("AUTH_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+    # Secure over HTTPS (the tailnet), not over http://localhost: Safari doesn't keep a Secure
+    # cookie set on plain-http localhost, so always-Secure would break sign-in there (#442, D-119).
+    # AUTH_COOKIE_SECURE=1 still forces it everywhere.
+    forced = os.getenv("AUTH_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+    secure = forced or _request_is_https(request)
     samesite = _cookie_samesite()
     response.set_cookie(
         key=refresh_cookie_name(),
@@ -291,7 +307,7 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
     refresh_token = _create_refresh_session(db, user_id=user_id)
     db.commit()
 
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(response, refresh_token, request)
     return _session_response(db, user_id=user_id, access_token=access_token, exp=exp, now=now)
 
 
@@ -428,7 +444,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
                         next_refresh_token = _create_refresh_session(db, user_id=user_id, now=now)
                         access_token, exp = create_access_token(user_id=user_id, username=username)
                         db.commit()
-                        _set_refresh_cookie(response, next_refresh_token)
+                        _set_refresh_cookie(response, next_refresh_token, request)
                         return _session_response(
                             db, user_id=user_id, access_token=access_token, exp=exp, now=now
                         )
@@ -487,7 +503,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     access_token, exp = create_access_token(user_id=user_id, username=username)
     db.commit()
 
-    _set_refresh_cookie(response, next_refresh_token)
+    _set_refresh_cookie(response, next_refresh_token, request)
     return _session_response(db, user_id=user_id, access_token=access_token, exp=exp, now=now)
 
 
@@ -644,7 +660,7 @@ def google_callback(
     # A same-site hop (meta refresh) to the app, so its Strict refresh cookie is sent on the next load.
     next_path = google_oauth.safe_next_path(str(flow.get("next") or ""))
     response = _google_page(200, "Signed in", "Opening CapitalOS…", link=next_path, link_text="Continue", go=True)
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(response, refresh_token, request)
     response.delete_cookie(_google_flow_cookie_name(), path="/")
     return response
 

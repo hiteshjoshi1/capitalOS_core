@@ -8,13 +8,25 @@
 # and labels the container, removes it when this script or the owning Claude
 # process goes away, and reaps leftovers whose owner is no longer running.
 #
-# Env: MCP_PG_NETWORK (docker network of the target Postgres), MCP_PG_HOST,
+# Env: MCP_PG_NETWORK (docker network of the target Postgres; default: the DB container's
+# *_default network), MCP_PG_CONTAINER (default: the Makefile's DB_CONTAINER), MCP_PG_HOST,
 # MCP_PG_DATABASE, MCP_PG_USER, MCP_DB_PASSWORD (default: read from the repo .env).
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 IMAGE=$("$ROOT/scripts/tool-image.sh" mcp-toolbox) || exit 1
-NETWORK=${MCP_PG_NETWORK:-capitalos_default}
+# The network comes from the database container itself (#442): the main checkout's stack is
+# capitalos-oss-test (network capitalos-oss-test_default), a fresh clone's is capitalos. A
+# hard-coded capitalos_default failed at every session start. MCP_PG_NETWORK still overrides.
+NETWORK=${MCP_PG_NETWORK:-}
+if [ -z "$NETWORK" ]; then
+  DB_CONTAINER=${MCP_PG_CONTAINER:-$(make -s -C "$ROOT" --no-print-directory print-db-container 2>/dev/null)}
+  NETWORK=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$DB_CONTAINER" 2>/dev/null | grep '_default$' | head -1)
+  if [ -z "$NETWORK" ]; then
+    echo "mcp-postgres: database container '${DB_CONTAINER:-?}' not found or not on a *_default network; is the stack up (make up)?" >&2
+    exit 1
+  fi
+fi
 if [ -z "${MCP_DB_PASSWORD:-}" ] && [ -f "$ROOT/.env" ]; then
   MCP_DB_PASSWORD=$(sed -n 's/^MCP_DB_PASSWORD=//p' "$ROOT/.env" | tail -1)
 fi
