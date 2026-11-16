@@ -416,7 +416,10 @@ SELECT
   sm.as_of_date,
   r.quantity,
   r.currency,
-  r.avg_cost,
+  -- #443 (V8): the statement's price is the month's value per share, like a real broker
+  -- statement. It was the average cost (a constant), so closed months had "same price,
+  -- different value" and the bridge put every market move into Unexplained.
+  ROUND(r.market_value_local * sm.growth_factor / NULLIF(r.quantity, 0), 6),
   ROUND(r.market_value_local * sm.growth_factor, 2),
   ROUND(r.market_value_local * sm.growth_factor * r.fx_rate_to_base, 2),
   ROUND(r.market_value_local * sm.growth_factor, 2),
@@ -626,9 +629,16 @@ SELECT
   i.symbol,
   i.name,
   i.decimals,
-  ROUND(i.base_normalized_amount * sm.growth_factor)::text,
-  ROUND(i.base_normalized_amount * sm.growth_factor, 6),
-  i.price_usd,
+  -- #443 (V8): the month's growth is a price move (amount held stays the same), as in real
+  -- wallets, so the bridge shows it under Markets. It was a growing amount at a fixed price,
+  -- which read as "crypto moved into the wallets" in Unexplained. Stablecoins keep a $1 price,
+  -- so theirs stays a change in the amount held.
+  CASE WHEN i.symbol IN ('USDC', 'USDT', 'DAI') THEN ROUND(i.base_normalized_amount * sm.growth_factor)
+       ELSE ROUND(i.base_normalized_amount) END::text,
+  CASE WHEN i.symbol IN ('USDC', 'USDT', 'DAI') THEN ROUND(i.base_normalized_amount * sm.growth_factor, 6)
+       ELSE ROUND(i.base_normalized_amount, 6) END,
+  CASE WHEN i.symbol IN ('USDC', 'USDT', 'DAI') THEN i.price_usd
+       ELSE ROUND(i.price_usd * sm.growth_factor, 8) END,
   ROUND(i.base_value_usd * sm.growth_factor, 2),
   'DUMMY'
 FROM seed_wallet_items i

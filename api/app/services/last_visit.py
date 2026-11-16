@@ -91,10 +91,39 @@ def mark_visit(
     if moved:
         value = live_net_worth(db, user.id, base).quantize(Decimal("0.01"))
         if row is None:
-            row = UserLastVisit(user_id=user.id, seen_at=now, net_worth=value, base_currency=base)
-            db.add(row)
+            # #443 (V10): two first visits can race (two tabs, a double effect), and a plain
+            # INSERT made the second one fail with a 500 (UniqueViolation). Insert-or-skip: the
+            # loser keeps the winner's mark, as a visit within LAST_VISIT_MIN_GAP would, unless
+            # it is a Dismiss (force), which moves the mark anyway.
+            moved = _insert_first_visit(db, user.id, now, value, base, force=force)
         else:
             row.seen_at, row.net_worth, row.base_currency = now, value, base
         db.commit()
+        db.expire_all()
+        row = db.get(UserLastVisit, user.id)
     assert row is not None
     return {"moved": moved, "seen_at": _aware(row.seen_at).isoformat()}
+
+
+def _insert_first_visit(
+    db: Session, user_id: int, now: datetime, value: Decimal, base: str, *, force: bool
+) -> bool:
+    """INSERT … ON CONFLICT on user_id (Postgres; SQLite in tests). True when this call set the mark."""
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    elif dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert
+    else:  # pragma: no cover - only Postgres and SQLite are used
+        raise RuntimeError(f"unsupported database for user_last_visit: {dialect}")
+    values = {"user_id": user_id, "seen_at": now, "net_worth": value, "base_currency": base}
+    stmt = insert(UserLastVisit).values(**values)
+    if force:
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserLastVisit.user_id],
+            set_={"seen_at": now, "net_worth": value, "base_currency": base},
+        )
+        db.execute(stmt)
+        return True
+    result = db.execute(stmt.on_conflict_do_nothing(index_elements=[UserLastVisit.user_id]))
+    return bool(result.rowcount)

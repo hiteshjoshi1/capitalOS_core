@@ -2,6 +2,7 @@
 tags), U3 ("Since your last visit")."""
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -153,3 +154,52 @@ def test_visit_mark_moves_after_the_gap(db_engine, stub_net_worth):
         assert last_visit.mark_visit(db, user, "SGD", now=t0 + timedelta(minutes=30))["moved"] is False
         assert last_visit.mark_visit(db, user, "SGD", now=t0 + timedelta(hours=2))["moved"] is True
         assert db.get(UserLastVisit, 1).net_worth is not None
+
+
+def _race_first_visit(monkeypatch, db, other_seen_at):
+    """Simulate a concurrent first visit: another request inserts the row after this one
+    has read "no row yet" (db.get) and before it inserts."""
+    real_get = db.get
+    calls = {"n": 0}
+
+    def get(model, key, *a, **kw):
+        if model is UserLastVisit and calls["n"] == 0:
+            calls["n"] += 1
+            Other = sessionmaker(bind=db.get_bind())
+            with Other() as other:
+                other.add(UserLastVisit(user_id=key, seen_at=other_seen_at, net_worth=Decimal("900.00"), base_currency="SGD"))
+                other.commit()
+            return None
+        return real_get(model, key, *a, **kw)
+
+    monkeypatch.setattr(db, "get", get)
+
+
+def test_racing_first_visits_dont_fail(db_engine, stub_net_worth, monkeypatch):
+    """#443 (V10): the second of two simultaneous first visits used to raise UniqueViolation (500)."""
+    Session = sessionmaker(bind=db_engine)
+    with Session() as db:
+        user = CurrentUser(id=1, username="test")
+        t_other = datetime(2026, 11, 1, 9, tzinfo=timezone.utc)
+        _race_first_visit(monkeypatch, db, t_other)
+        out = last_visit.mark_visit(db, user, "SGD", now=t_other + timedelta(seconds=1))
+        assert out["moved"] is False  # the other request's mark stands
+        assert db.get(UserLastVisit, 1).net_worth == Decimal("900.00")
+
+
+def test_racing_dismiss_still_moves_the_mark(db_engine, stub_net_worth, monkeypatch):
+    Session = sessionmaker(bind=db_engine)
+    with Session() as db:
+        user = CurrentUser(id=1, username="test")
+        t_other = datetime(2026, 11, 1, 9, tzinfo=timezone.utc)
+        _race_first_visit(monkeypatch, db, t_other)
+        out = last_visit.mark_visit(db, user, "SGD", force=True, now=t_other + timedelta(seconds=1))
+        assert out["moved"] is True
+        row = db.get(UserLastVisit, 1)
+        assert row.net_worth == Decimal("1000.00")
+
+
+def test_racing_first_visits_over_http(client: TestClient, stub_net_worth, db_engine):
+    """Two first visits back to back over the API both answer 200."""
+    assert client.post("/dashboard/visit?base_currency=SGD").status_code == 200
+    assert client.post("/dashboard/visit?base_currency=SGD").status_code == 200
