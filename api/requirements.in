@@ -35,7 +35,8 @@ platformdirs==4.13.5
 pycparser==3.12
 python-dateutil==2.9.0.post0
 pytz==2026.5
-soupsieve==3.0.4
+# Security fix, taken under 14 days (D-1 exception): CVE-2026-126190 (HIGH, polynomial-time DoS), #444.
+soupsieve==4.0
 starlette==1.10.0
 tzdata==2026.5
 tzlocal==5.4.5
