@@ -217,7 +217,6 @@ export default function WealthOverview() {
     sinceUpdate?.basis === "quoted_at_compare_date" && sinceUpdate.compare_basis?.price_date
       ? `Moves since ${fmt.formatDate(sinceUpdate.compare_basis.price_date)}, each holding at its last quote on or before that date.`
       : null;
-  const olderStatementCount = sinceUpdate?.compare_basis?.older_statement_priced ?? 0;
   const todayFallbackShown = [
     ...(sinceUpdate?.top_movers?.gainers ?? []).slice(0, 3),
     ...(sinceUpdate?.top_movers?.detractors ?? []).slice(0, 2),
@@ -401,37 +400,10 @@ export default function WealthOverview() {
             ) : null}
             <FxNote sources={[bootstrap, summary]} />
 
+            {/* #443 (V5): one baseline in the hero, the page's month-end ("vs Oct month-end").
+                "Since last update" (market moves since the newest quote date) left the hero: the
+                strip above answers "since I last looked", and today's movers stay below. */}
             <div className="coHeroDeltaRow">
-              {!isLive ? null : sinceUpdate?.net_worth_change ? (
-                <div className="coHeroDelta">
-                  <span className="coHeroDeltaLabel" title={sinceUpdateBasisText ?? undefined}>
-                    SINCE LAST UPDATE{sinceUpdate.compare_as_of ? ` (${formatChipAsOf(sinceUpdate.compare_as_of)})` : ""}
-                  </span>
-                  <strong>
-                    <Delta
-                      abs={sinceUpdate.net_worth_change.abs}
-                      pct={sinceUpdate.net_worth_change.pct}
-                      currency={sinceUpdateCurrency}
-                      missingReason={sinceUpdate.net_worth_change.baseline_missing ? "no earlier update to compare with" : null}
-                    />
-                  </strong>
-                  {olderStatementCount > 0 ? (
-                    <span className="coHeroDeltaNote">
-                      {olderStatementCount === 1 ? "1 holding" : `${olderStatementCount} holdings`} vs an older statement price
-                    </span>
-                  ) : null}
-                </div>
-              ) : sinceUpdateRes.isLoading ? (
-                <div className="coHeroDelta">
-                  <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
-                  <strong className="muted">…</strong>
-                </div>
-              ) : sinceUpdateRes.error ? (
-                <div className="coHeroDelta">
-                  <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
-                  <LoadError compact title="Couldn't load" onRetry={retry(sinceUpdateRes)} />
-                </div>
-              ) : null}
               {prevMonthChange ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">{prevMonthLabel}</span>

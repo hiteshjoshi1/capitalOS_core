@@ -106,7 +106,10 @@ fi
 # 6. Stack
 say "Stack"
 make -s up
-if make -s observability-running; then make -s observability-up; fi
+# Observability (Loki/Grafana/Alloy) is optional (#442): restarted when it was running, otherwise
+# skipped quietly (make's "Error 1" for the check read like a failed deploy).
+obs_running() { make -s --no-print-directory observability-running >/dev/null 2>&1; }
+if obs_running; then make -s observability-up; fi
 
 # 7. Health
 say "Health"
@@ -124,10 +127,14 @@ for _ in $(seq 1 30); do curl -sf "$web/" >/dev/null && break; sleep 1; done
 curl -sf "$web/" >/dev/null || die "the web app is not serving at $web (make web-logs). Previous commit: $(git rev-parse --short "$FROM")"
 curl -sf "$web/api/health" >/dev/null || die "the web app's /api proxy does not reach the API (make web-logs). Previous commit: $(git rev-parse --short "$FROM")"
 echo "Web: ok ($web, /api proxy ok)"
-if make -s observability-running; then
+if obs_running; then
   curl -sf http://127.0.0.1:3100/ready >/dev/null && echo "Loki: ready" || echo "Loki: NOT ready"
   curl -sf http://127.0.0.1:3000/api/health >/dev/null && echo "Grafana: ok" || echo "Grafana: NOT ok"
+else
+  echo "Observability: not running (skipped; make observability-up to start it)"
 fi
+# #442: secrets and raw statements stay owner-only.
+scripts/secure-perms.sh check || true
 trap - EXIT
 record ok
 echo

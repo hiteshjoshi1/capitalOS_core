@@ -441,7 +441,7 @@ describe("WealthOverview", () => {
     expect(donut).toHaveAccessibleDescription(/Stocks & Funds 93\.3%, Cash 6\.7%/);
   });
 
-  it("renders a since-last-update delta strip on the hero card", async () => {
+  it("keeps one baseline in the hero: no since-last-update delta (#443, V5)", async () => {
     mockSubscribe.mockImplementation(() => () => {});
     mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
     mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
@@ -466,8 +466,11 @@ describe("WealthOverview", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText(/SINCE LAST UPDATE/)).toBeInTheDocument();
-    expect(screen.getByText("+S$ 5.00 (+5.0%)")).toBeInTheDocument();
+    expect(await screen.findByText("CURRENT NET WORTH")).toBeInTheDocument();
+    // The since-update call still runs (Today's movers use it), but the hero doesn't show it.
+    await waitFor(() => expect(mockApi.netWorthSinceUpdate).toHaveBeenCalled());
+    expect(screen.queryByText(/SINCE LAST UPDATE/)).not.toBeInTheDocument();
+    expect(screen.queryByText("+S$ 5.00 (+5.0%)")).not.toBeInTheDocument();
   });
 
   it("shows the live comparisons next to the live headline (#133)", async () => {
@@ -600,11 +603,8 @@ describe("WealthOverview", () => {
         "Moves since 14 May 2026, each holding at its last quote on or before that date. * No quote on or before 14 May 2026: compared with its own, older statement price.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("1 holding vs an older statement price")).toBeInTheDocument();
-    expect(screen.getByText(/SINCE LAST UPDATE/)).toHaveAttribute(
-      "title",
-      "Moves since 14 May 2026, each holding at its last quote on or before that date.",
-    );
+    // #443 (V5): the hero no longer carries "since last update"; Today's movers still explain it.
+    expect(screen.queryByText(/SINCE LAST UPDATE/)).not.toBeInTheDocument();
   });
 });
 

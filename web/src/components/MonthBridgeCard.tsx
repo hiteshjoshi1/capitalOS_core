@@ -66,7 +66,9 @@ export function BridgeRow({
           ) : null}
         </span>
         <span className="monthBridgeAmount">
-          <Delta abs={line.amount} currency={currency} show="abs" />
+          {/* #443 (V7): Unexplained is money the app can't account for, not a gain or a loss:
+              caution colour whatever its sign. */}
+          <Delta abs={line.amount} currency={currency} show="abs" tone={line.key === "unexplained" ? "neutral" : "normal"} />
         </span>
       </div>
       {summary && !open ? <p className="monthBridgeSummary muted">{summary}</p> : null}

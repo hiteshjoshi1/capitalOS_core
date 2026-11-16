@@ -3640,6 +3640,11 @@ a.btn {
   color: var(--muted);
 }
 
+/* #443 (V7): a change that is neither good nor bad news (Unexplained): caution colour, either sign. */
+.delta--neutral {
+  color: var(--warn);
+}
+
 .delta--missing {
   font-weight: 500;
 }
@@ -3667,6 +3672,10 @@ a.btn {
 
 .deltaChip.delta--down {
   background: color-mix(in srgb, var(--delta-down) 14%, transparent 86%);
+}
+
+.deltaChip.delta--neutral {
+  background: color-mix(in srgb, var(--warn) 14%, transparent 86%);
 }
 
 .deltaChip.delta--missing {

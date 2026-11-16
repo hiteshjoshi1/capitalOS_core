@@ -137,6 +137,9 @@ describe("<MonthBridgeCard>", () => {
     expect(within(screen.getByTestId("bridge-line-fx")).getByText("-S$ 2,800")).toBeInTheDocument();
     // The residual is a row like the others, never hidden.
     expect(within(screen.getByTestId("bridge-line-unexplained")).getByText("-S$ 800.00")).toBeInTheDocument();
+    // #443 (V7): Unexplained is caution-coloured whatever its sign; Markets keeps the gain colour.
+    expect(screen.getByTestId("bridge-line-unexplained").querySelector(".delta")).toHaveClass("delta--neutral");
+    expect(screen.getByTestId("bridge-line-markets").querySelector(".delta")).toHaveClass("delta--up");
     // Markets says how it splits between stocks and crypto.
     expect(within(screen.getByTestId("bridge-line-markets")).getByText(/stocks & funds \+S\$ 15,100 · crypto \+S\$ 4,300/)).toBeInTheDocument();
     expect(screen.getByText(/Month to date: flows from 1 Nov 2026/)).toBeInTheDocument();

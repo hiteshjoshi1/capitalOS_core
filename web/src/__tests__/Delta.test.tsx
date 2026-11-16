@@ -170,3 +170,16 @@ describe("DeltaArrow (#268)", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe("Delta neutral tone (#443, V7)", () => {
+  it("colours a change that is neither good nor bad the same way in both directions, arrow kept", () => {
+    const { container, rerender } = render(<Delta abs={91489} currency="SGD" show="abs" tone="neutral" />);
+    expect(container.firstElementChild).toHaveClass("delta--neutral");
+    expect(container.textContent).toContain("▲");
+    rerender(<Delta abs={-500} currency="SGD" show="abs" tone="neutral" />);
+    expect(container.firstElementChild).toHaveClass("delta--neutral");
+    expect(container.textContent).toContain("▼");
+    rerender(<Delta abs={0} currency="SGD" show="abs" tone="neutral" />);
+    expect(container.firstElementChild).toHaveClass("delta--flat");
+  });
+});

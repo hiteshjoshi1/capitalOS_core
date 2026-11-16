@@ -37,6 +37,14 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   scratch). All are non-root except `docker-socket-proxy`, the only container with the Docker socket:
   it exposes read-only container/event endpoints to Alloy on an internal network (`docker-api`).
   Loki/Grafana/Alloy sit on an `observability` network that can't reach Postgres.
+- File permissions (#442): `.env` 600; `data/`, `state/`, `backups/`, the backup folder and `~/.capitalos` 700.
+  `make secure-perms` lists drift, `APPLY=1` fixes it; `make status` and `make deploy` warn. Docker Desktop shares
+  bind mounts as the Mac user, so the API (uid 10001) still reads/writes `data/` and `state/` at 700.
+- Login cookie (#442, D-119): Secure when the browser came over HTTPS. nginx forwards `X-Forwarded-Proto: https`
+  for `*.ts.net` hosts (only `tailscale serve` can reach the loopback-bound web container); plain
+  `http://localhost:5173` keeps a non-Secure cookie (Safari drops Secure cookies there). `AUTH_COOKIE_SECURE=1` forces it.
+- Observability is optional: `make status` counts the 3 core containers and shows observability as on/off;
+  `make deploy` says "Observability: not running (skipped)" instead of a make error (#442).
 - The web container publishes on `127.0.0.1` only: Docker Desktop hides client addresses from containers, so the
   tailnet reaches it through `tailscale serve`, never the LAN; nginx answers 421 to any Host but localhost or
   `*.ts.net` (DNS rebinding).
@@ -200,6 +208,8 @@ From the main checkout:
   `scripts/mcp-postgres.sh`. It connects as `capitalos_mcp_ro`: read-only at the DB level, and no
   access to `user_credentials`/`auth_sessions`. Set it up once with `make db-create-mcp-role`
   (password in `.env` as `MCP_DB_PASSWORD`), and re-run it after rotating the password.
+- It joins the database container's own `*_default` network (`make print-db-container`; in this checkout
+  `capitalos-oss-test_default`), never a hard-coded name (#442). `make mcp-check` = initialize + one SELECT.
 
 ## Headless browser QA (screenshots)
 Playwright works. With `web/.env.local` → `VITE_API_BASE=/api` (this checkout) everything is
