@@ -15,7 +15,7 @@ cp "$src/scripts/secure-perms.sh" "$src/scripts/backup-env.sh" "$repo/scripts/"
 echo "SECRET=x" >"$repo/.env"; touch "$home/.capitalos/backup/age-identity.txt"
 chmod 644 "$repo/.env" "$home/.capitalos/backup/age-identity.txt"
 chmod 755 "$repo/data" "$repo/state" "$home/.capitalos" "$home/.capitalos/backup"
-mode_of() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }  # GNU first: on Linux `stat -f` reports the filesystem
 run() { HOME=$home BACKUP_DIR= "$repo/scripts/secure-perms.sh" "$@"; }
 
 out=$(run check); rc=$?

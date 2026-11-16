@@ -24,7 +24,7 @@ targets() {
   if [ -n "${BACKUP_DIR:-}" ] && [ -d "$BACKUP_DIR" ] && [ "$BACKUP_DIR" != "$ROOT/backups" ]; then echo "700 $BACKUP_DIR"; fi
 }
 
-mode_of() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }  # GNU first: on Linux `stat -f` reports the filesystem
 
 # Wider than wanted = any bit set that the wanted mode doesn't have (group/other access).
 too_wide() {  # <have> <want>
