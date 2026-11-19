@@ -37,7 +37,7 @@ def _auth_header(client, username: str, password: str) -> dict:
 def test_get_preferences_creates_defaults_on_first_read(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2001, username="pref_user1", password="PrefPass1!")
     headers = _auth_header(client, "pref_user1", "PrefPass1!")
@@ -61,7 +61,7 @@ def test_get_preferences_creates_defaults_on_first_read(client, db_engine, monke
 def test_get_preferences_returns_existing_row(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2002, username="pref_user2", password="PrefPass2!")
     with db_engine.begin() as conn:
@@ -86,7 +86,7 @@ def test_get_preferences_returns_existing_row(client, db_engine, monkeypatch):
 def test_patch_preferences_updates_theme(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2003, username="pref_user3", password="PrefPass3!")
     headers = _auth_header(client, "pref_user3", "PrefPass3!")
@@ -101,7 +101,7 @@ def test_patch_preferences_updates_theme(client, db_engine, monkeypatch):
 def test_patch_preferences_updates_accent_color(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2004, username="pref_user4", password="PrefPass4!")
     headers = _auth_header(client, "pref_user4", "PrefPass4!")
@@ -116,7 +116,7 @@ def test_patch_preferences_updates_accent_color(client, db_engine, monkeypatch):
 def test_patch_preferences_updates_both_fields(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2005, username="pref_user5", password="PrefPass5!")
     headers = _auth_header(client, "pref_user5", "PrefPass5!")
@@ -131,7 +131,7 @@ def test_patch_preferences_updates_both_fields(client, db_engine, monkeypatch):
 def test_patch_preferences_rejects_invalid_theme(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2006, username="pref_user6", password="PrefPass6!")
     headers = _auth_header(client, "pref_user6", "PrefPass6!")
@@ -143,7 +143,7 @@ def test_patch_preferences_rejects_invalid_theme(client, db_engine, monkeypatch)
 def test_patch_preferences_rejects_invalid_accent_color(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2007, username="pref_user7", password="PrefPass7!")
     headers = _auth_header(client, "pref_user7", "PrefPass7!")
@@ -155,7 +155,7 @@ def test_patch_preferences_rejects_invalid_accent_color(client, db_engine, monke
 def test_patch_preferences_preserves_existing_on_partial_update(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2008, username="pref_user8", password="PrefPass8!")
     with db_engine.begin() as conn:
@@ -181,7 +181,7 @@ def test_patch_preferences_preserves_existing_on_partial_update(client, db_engin
 def test_preferences_require_authentication(anon_client, monkeypatch):
     client = anon_client  # these checks need a request with no credentials (#154)
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     get_resp = client.get("/auth/preferences")
     assert get_resp.status_code == 401
@@ -194,7 +194,7 @@ def test_get_preferences_is_idempotent(client, db_engine, monkeypatch):
     """Calling GET /auth/preferences multiple times should always return the same row."""
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=2009, username="pref_user9", password="PrefPass9!")
     headers = _auth_header(client, "pref_user9", "PrefPass9!")

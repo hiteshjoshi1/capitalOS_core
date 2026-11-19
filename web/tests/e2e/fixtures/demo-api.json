@@ -1655,7 +1655,8 @@
     "cash": 1974805,
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
-    "liabilities": 53512.9
+    "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9
    },
    "current_net_worth_freshness": {
     "stocks": {
@@ -1687,7 +1688,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.5421250002,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "current_stock_exposure_total": 7568871.834718291,
    "current_crypto_exposure_total": 1882638.75,
@@ -2122,7 +2124,8 @@
      "cash": 1946357.1435,
      "stocks_funds": 6536003.26025146,
      "crypto": 1856789.5421250002,
-     "liabilities": 29741.5
+     "liabilities": 29741.5,
+     "estimated_liabilities": 29741.5
     },
     "baseline_missing": false
    },
@@ -2136,7 +2139,8 @@
      "cash": 1974805,
      "stocks_funds": 7568871.834718291,
      "crypto": 1882638.75,
-     "liabilities": 53512.9
+     "liabilities": 53512.9,
+     "estimated_liabilities": 53512.9
     },
     "baseline_missing": false
    },
@@ -2342,25 +2346,25 @@
         "label": "DUMMY - Amex Platinum",
         "amount": 19120,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        },
        {
         "label": "DUMMY - DBS Credit Card",
         "amount": 6882,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        },
        {
         "label": "DUMMY - Citi Prestige",
         "amount": 2642,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        },
        {
         "label": "DUMMY - UOB Credit Card",
         "amount": 1097.5,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        }
       ]
      },
@@ -2666,6 +2670,7 @@
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
     "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9,
     "as_of": "2026-11-10T22:13:44+08:00",
     "uploads": [
      "CITI"
@@ -2688,6 +2693,7 @@
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
     "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9,
     "as_of": "2026-11-10T22:13:44+08:00",
     "uploads": [
      "CITI"
@@ -2825,7 +2831,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.5421250002,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "top_holdings": [
     {
@@ -3136,7 +3143,8 @@
     "cash": 1974805,
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
-    "liabilities": 53512.9
+    "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9
    },
    "net_worth_boundary_at": "2026-11-10T22:13:43+08:00",
    "currency_exposure": {
@@ -5189,7 +5197,8 @@
     "cash": 1974805,
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
-    "liabilities": 53512.9
+    "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9
    },
    "current_net_worth_freshness": {
     "stocks": {
@@ -5221,7 +5230,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.5421250002,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "geography": [
     {
@@ -10538,7 +10548,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.542125,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "top_holdings": [
     {
@@ -10849,7 +10860,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.542125,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "net_worth_boundary_at": "2026-11-01T00:00:00+00:00",
    "currency_exposure": {
@@ -10997,6 +11009,126 @@
    "holdings_without_data": 32,
    "holdings_no_dividend_history": 32,
    "data_as_of": null
+  }
+ },
+ "/ingest/checklist": {
+  "status": 200,
+  "body": {
+   "month": "2026-11",
+   "done": 10,
+   "total": 10,
+   "sources": [
+    {
+     "source_key": "account:10",
+     "account_id": 10,
+     "label": "DUMMY - Amex Platinum",
+     "platform": "AMEX",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-07",
+     "overdue": false
+    },
+    {
+     "source_key": "account:11",
+     "account_id": 11,
+     "label": "DUMMY - Citi Prestige",
+     "platform": "CITI",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": "2026-11-04",
+     "last_data_date": "2026-11-07",
+     "overdue": false
+    },
+    {
+     "source_key": "account:8",
+     "account_id": 8,
+     "label": "DUMMY - DBS Credit Card",
+     "platform": "DBS",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": "2026-10-31",
+     "last_data_date": "2026-11-07",
+     "overdue": false
+    },
+    {
+     "source_key": "account:2",
+     "account_id": 2,
+     "label": "DUMMY - DBS Savings",
+     "platform": "DBS",
+     "kind": "bank_statement",
+     "done": true,
+     "last_import_date": "2026-10-21",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:6",
+     "account_id": 6,
+     "label": "DUMMY - DBS Vickers SGX",
+     "platform": "DBS_VICKERS",
+     "kind": "broker_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:5",
+     "account_id": 5,
+     "label": "DUMMY - IBKR Global",
+     "platform": "IBKR",
+     "kind": "broker_statement",
+     "done": true,
+     "last_import_date": "2026-10-27",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:3",
+     "account_id": 3,
+     "label": "DUMMY - OCBC 360",
+     "platform": "OCBC",
+     "kind": "bank_statement",
+     "done": true,
+     "last_import_date": "2026-10-23",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:7",
+     "account_id": 7,
+     "label": "DUMMY - SG Money Market Fund",
+     "platform": "DBS",
+     "kind": "broker_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:9",
+     "account_id": 9,
+     "label": "DUMMY - UOB Credit Card",
+     "platform": "UOB",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-06",
+     "overdue": false
+    },
+    {
+     "source_key": "account:4",
+     "account_id": 4,
+     "label": "DUMMY - UOB One",
+     "platform": "UOB",
+     "kind": "bank_statement",
+     "done": true,
+     "last_import_date": "2026-10-25",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    }
+   ]
   }
  }
 }

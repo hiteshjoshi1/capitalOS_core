@@ -34,6 +34,8 @@ export type DashboardSummary = FxStatus & {
     stocks_funds: number;
     crypto: number;
     liabilities: number;
+    /** #450: the part of `liabilities` that is an estimate (cards with no statement balance on file). */
+    estimated_liabilities?: number | null;
   };
 
   geography: Array<{
@@ -599,6 +601,9 @@ export type NetWorthBreakdown = {
   stocks_funds: number;
   crypto: number;
   liabilities: number;
+  /** #450: the part of `liabilities` that is an estimate: cards with no statement (dated)
+   * balance on file count this month's charges only. Absent/null: not known. */
+  estimated_liabilities?: number | null;
 };
 
 export type AssetClassFreshness = {
@@ -670,6 +675,8 @@ export type WealthTimeline = {
     stocks_funds: number;
     crypto: number;
     liabilities: number;
+    /** #450: as on NetWorthBreakdown (this point is the live headline's net worth). */
+    estimated_liabilities?: number | null;
     as_of: string | null;
     /** Platforms with a statement import in the still-open month (#138). */
     uploads: string[];

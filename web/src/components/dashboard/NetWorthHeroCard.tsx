@@ -82,7 +82,7 @@ export default function NetWorthHeroCard({
         <div className="kpi">
           <div className="label">Liabilities</div>
           <div className="val">{formatMoney(summary?.net_worth.liabilities)}</div>
-          <Link className="kpiDetailLink" to="/liabilities">Open details</Link>
+          <Link className="kpiDetailLink" to="/cards">Open details</Link>
         </div>
       </div>
 

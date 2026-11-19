@@ -255,7 +255,7 @@ describe("<MonthBridgeCard>", () => {
           key: "card_balances",
           label: "Card balances not matched by card transactions",
           amount: 300,
-          items: [{ label: "Synthetic Card", amount: 300, reason: "no statement balance. Enter its statement balance", link: "/liabilities" }],
+          items: [{ label: "Synthetic Card", amount: 300, reason: "no statement balance. Enter its statement balance", link: "/cards" }],
         },
       ],
     });
@@ -269,7 +269,7 @@ describe("<MonthBridgeCard>", () => {
     const rest = screen.getByTestId("bridge-line-unexplained");
     fireEvent.click(within(rest).getByRole("button", { name: /Unexplained/ }));
     const items = within(rest).getByRole("list", { name: "Card balances not matched by card transactions: items" });
-    expect(within(items).getByRole("link", { name: "Synthetic Card" })).toHaveAttribute("href", "/liabilities");
+    expect(within(items).getByRole("link", { name: "Synthetic Card" })).toHaveAttribute("href", "/cards");
     expect(within(items).getByText("+S$ 300.00")).toBeInTheDocument();
     expect(within(items).getByText(/Enter its statement balance/)).toBeInTheDocument();
   });

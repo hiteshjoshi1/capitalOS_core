@@ -387,7 +387,8 @@ def test_closed_accounts_contribute_nothing_after_the_close_date(household, db_e
 
     points = _timeline_points(client)  # the next ordinary read
     for month, expected in (("2026-01", jan_after), ("2026-02", feb_after)):
-        assert {k: points[month][k] for k in _COMPONENTS} == pytest.approx(expected, abs=0.01), month
+        expected_stored = {k: expected[k] for k in _COMPONENTS}  # History doesn't store estimated_liabilities
+        assert {k: points[month][k] for k in _COMPONENTS} == pytest.approx(expected_stored, abs=0.01), month
 
     # Reopening restores February, in History too.
     for account_id in _USER_A_ACCOUNTS:

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict, Any, List, Optional
 
 from app.schemas.fx import FxStatusFields
@@ -10,6 +10,9 @@ class NetWorth(BaseModel):
     stocks_funds: float
     crypto: float
     liabilities: float
+    # #450: the part of ``liabilities`` that is an estimate: cards with no dated
+    # (statement) balance on file count this month's charges only.
+    estimated_liabilities: Optional[float] = None
 
 
 class AssetClassFreshness(BaseModel):
@@ -133,8 +136,7 @@ class DashboardSummaryResponse(FxStatusFields):
     cash_percent: float
     data_completeness_indicators: Optional[List[Dict[str, Any]]] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class RiskHolding(BaseModel):
@@ -276,8 +278,7 @@ class NetWorthSinceUpdateResponse(BaseModel):
     basis: Optional[str] = None
     compare_basis: Optional[SinceUpdateCompareBasis] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class NetWorthChangeResponse(BaseModel):
@@ -290,8 +291,7 @@ class NetWorthChangeResponse(BaseModel):
     net_worth_freshness_status: Optional[str] = None
     net_worth_change: Optional[Dict[str, NetWorthChange]] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class StockBreakdownItem(BaseModel):
@@ -693,6 +693,8 @@ class WealthTimelineNow(BaseModel):
     stocks_funds: float
     crypto: float
     liabilities: float
+    # #450: as on NetWorth (this "now" point is the live headline's net worth).
+    estimated_liabilities: Optional[float] = None
     as_of: Optional[str] = None
     # Platforms with a statement import this (still open) month (#138).
     uploads: List[str] = Field(default_factory=list)

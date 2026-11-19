@@ -1,7 +1,7 @@
 // Uploads and import jobs: API calls (split out of lib/api.ts, #368).
 import { UploadRefusedError, uploadRefusalFrom } from "../errors";
 import { API_BASE, buildHeaders, formatHttpError, req } from "../http";
-import type { ImportJobDetail, ImportJobListItem, ImportJobRemoval, UploadDetect } from "../types/ingest";
+import type { ImportJobDetail, ImportJobListItem, ImportJobRemoval, UploadChecklist, UploadDetect } from "../types/ingest";
 
 export const ingestClient = {
   // asOf (YYYY-MM-DD): the statement's date, used when the file states none of its own (#141).
@@ -69,6 +69,8 @@ export const ingestClient = {
     return res.json() as Promise<UploadDetect>;
   },
   ingestJobs: () => req<ImportJobListItem[]>("/ingest/jobs"),
+  // #449: this month's statement uploads, done and still to do.
+  ingestChecklist: () => req<UploadChecklist>("/ingest/checklist"),
   ingestJob: (jobId: number) => req<ImportJobDetail>(`/ingest/jobs/${jobId}`),
   registerIngestSignature: (jobId: number, parserKey: string, asOf?: string) =>
     req<Record<string, unknown>>(`/ingest/jobs/${jobId}/register`, {

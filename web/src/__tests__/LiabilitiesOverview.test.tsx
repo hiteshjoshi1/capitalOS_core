@@ -137,6 +137,15 @@ describe("LiabilitiesOverview route", () => {
     expect(within(largestCategoryCard).getByText("Travel")).toBeInTheDocument();
   });
 
+  it("is titled Cards, with no claim that balances aren't estimates (#450)", async () => {
+    mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
+    renderPage();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Cards" })).toBeInTheDocument();
+    expect(screen.queryByText(/unreliable balance estimates/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Liabilities" })).not.toBeInTheDocument();
+  });
+
   it("notes card spend left out for lack of an FX rate (#170)", async () => {
     mockApi.creditCardAnalytics.mockResolvedValue(
       makeAnalytics({ fx_incomplete: true, fx_missing_currencies: ["XYZ"], fx_stale_currencies: [] }),

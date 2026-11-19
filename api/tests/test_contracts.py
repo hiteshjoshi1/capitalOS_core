@@ -31,6 +31,7 @@ def test_dashboard_summary_contract_shape(client: TestClient, seed_dashboard_dat
         "stocks_funds",
         "crypto",
         "liabilities",
+        "estimated_liabilities",  # #450
     }
     assert set(body["net_worth"].keys()) == {
         "total",
@@ -38,6 +39,7 @@ def test_dashboard_summary_contract_shape(client: TestClient, seed_dashboard_dat
         "stocks_funds",
         "crypto",
         "liabilities",
+        "estimated_liabilities",  # #450
     }
     assert isinstance(body["cash_percent"], float)
     assert "cash_flow" in body

@@ -19,7 +19,7 @@ from tests.test_auth import _cookie_value, _insert_user_with_password
 def auth_env(monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "30")
 
 
@@ -52,7 +52,7 @@ def _session_by_cookie(db_engine, cookie: str) -> dict:
 
 
 def _refresh_with(cookie: str):
-    return TestClient(app).post("/auth/refresh", cookies={"capitalos_refresh": cookie})
+    return TestClient(app).post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={cookie}"})
 
 
 def test_replay_outside_grace_window_ends_every_session(auth_env, db_engine):
@@ -102,7 +102,7 @@ def test_replay_inside_window_after_sign_out_refuses_without_ending_other_device
 
     first = _refresh_with(phone_cookie)
     phone_next = _cookie_value(first.headers.get("set-cookie", ""), "capitalos_refresh")
-    TestClient(app).post("/auth/logout", cookies={"capitalos_refresh": phone_next})
+    TestClient(app).post("/auth/logout", headers={"Cookie": f"capitalos_refresh={phone_next}"})
 
     assert _refresh_with(phone_cookie).status_code == 401
     assert _refresh_with(laptop_cookie).status_code == 200

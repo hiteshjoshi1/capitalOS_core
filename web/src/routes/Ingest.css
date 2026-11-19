@@ -132,3 +132,103 @@
   font-size: 13px;
   font-weight: 600;
 }
+
+/* #449: this month's uploads checklist, and several files at once. */
+.checklistList,
+.batchList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checklistRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.checklistMark {
+  width: 18px;
+  flex: none;
+  text-align: center;
+  color: var(--muted);
+}
+
+.checklistDone .checklistMark {
+  color: var(--good, var(--accent));
+}
+
+.checklistLabel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.checklistDone .checklistLabel {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.checklistMeta {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.batchRow {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.batchRowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.batchFile {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.batchNote {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.batchControls {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .batchControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.checklistDoneGroup {
+  margin-top: 8px;
+}
+
+.checklistDoneGroup summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}

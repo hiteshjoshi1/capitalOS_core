@@ -1027,6 +1027,7 @@
       "current_net_worth": {
         "cash": 61323.7327,
         "crypto": 21188.0184,
+        "estimated_liabilities": 970.55,
         "liabilities": 970.55,
         "stocks_funds": 13361.9841,
         "total": 94903.1852
@@ -1060,6 +1061,7 @@
       "net_worth": {
         "cash": 61000.8589,
         "crypto": 18237.788,
+        "estimated_liabilities": 305.4,
         "liabilities": 305.4,
         "stocks_funds": 11516.3878,
         "total": 90449.6347
@@ -1770,6 +1772,7 @@
         "as_of": "2026-03-18T10:00:00+08:00",
         "cash": 61323.7327,
         "crypto": 21188.0184,
+        "estimated_liabilities": 970.55,
         "liabilities": 970.55,
         "stocks_funds": 13361.9841,
         "total": 94903.1852,
@@ -2705,6 +2708,7 @@
       "current_net_worth": {
         "cash": 61323.7327,
         "crypto": 21188.0184,
+        "estimated_liabilities": 970.55,
         "liabilities": 970.55,
         "stocks_funds": 13361.9841,
         "total": 94903.1852
@@ -2771,6 +2775,7 @@
       "net_worth": {
         "cash": 56706.9641,
         "crypto": 10022.7273,
+        "estimated_liabilities": 960.0,
         "liabilities": 960.0,
         "stocks_funds": 10967.8161,
         "total": 76737.5074
@@ -3021,6 +3026,7 @@
       "current_net_worth": {
         "cash": 61323.7327,
         "crypto": 21188.0184,
+        "estimated_liabilities": 970.55,
         "liabilities": 970.55,
         "stocks_funds": 13361.9841,
         "total": 94903.1852
@@ -3096,6 +3102,7 @@
       "net_worth": {
         "cash": 61000.8589,
         "crypto": 18237.788,
+        "estimated_liabilities": 305.4,
         "liabilities": 305.4,
         "stocks_funds": 11516.3878,
         "total": 90449.6347
@@ -3399,6 +3406,7 @@
       "current_net_worth": {
         "cash": 61323.7327,
         "crypto": 21188.0184,
+        "estimated_liabilities": 970.55,
         "liabilities": 970.55,
         "stocks_funds": 13361.9841,
         "total": 94903.1852
@@ -3474,6 +3482,7 @@
       "net_worth": {
         "cash": 61000.8589,
         "crypto": 18237.788,
+        "estimated_liabilities": 305.4,
         "liabilities": 305.4,
         "stocks_funds": 11516.3878,
         "total": 90449.6347
@@ -4034,6 +4043,7 @@
       "current_net_worth": {
         "cash": 45729.3814,
         "crypto": 15800.0,
+        "estimated_liabilities": 723.7435,
         "liabilities": 723.7435,
         "stocks_funds": 9964.0913,
         "total": 70769.7292
@@ -4100,6 +4110,7 @@
       "net_worth": {
         "cash": 45488.613,
         "crypto": 13600.0,
+        "estimated_liabilities": 227.7381,
         "liabilities": 227.7381,
         "stocks_funds": 8587.8218,
         "total": 67448.6967

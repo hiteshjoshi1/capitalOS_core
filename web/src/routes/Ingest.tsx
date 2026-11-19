@@ -1,7 +1,7 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, UploadRefusedError } from "../lib/api";
-import type { Account, ImportJobListItem, UploadDetect, UploadRefusal } from "../lib/api";
+import type { Account, ImportJobListItem, UploadChecklist, UploadDetect, UploadRefusal } from "../lib/api";
 import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
 import "./Ingest.css";
@@ -15,6 +15,8 @@ import { formatPlatformLabel } from "../lib/platformLabels";
 import { detectNote, groupAccounts } from "../lib/uploadAccount";
 import LoadError from "../components/LoadError";
 import { uploadEffectLine, type UploadEffect } from "../lib/uploadEffect";
+import BatchUpload from "../components/BatchUpload";
+import UploadChecklistCard from "../components/UploadChecklistCard";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -64,6 +66,9 @@ export default function Ingest() {
   const [confirmRemoveJob, setConfirmRemoveJob] = useState<number | null>(null);
   const [removingJob, setRemovingJob] = useState<number | null>(null);
   const [removeNotice, setRemoveNotice] = useState<string>("");
+  // #449: this month's uploads, and several files dropped at once (a new drop remounts the batch).
+  const [checklist, setChecklist] = useState<UploadChecklist | null>(null);
+  const [batch, setBatch] = useState<{ key: number; files: File[] } | null>(null);
 
   // A new freshness link on the same page (#278) moves the statement date with it
   // (adjusting state while rendering, React's pattern for "reset when a prop changes").
@@ -84,6 +89,7 @@ export default function Ingest() {
           setAccountId(requestedAccountId);
         }
         setState("ready");
+        void refreshChecklist();
         if (requestedJob && j.some((job) => job.id === requestedJob)) {
           void onLoadJob(requestedJob);
         }
@@ -94,6 +100,27 @@ export default function Ingest() {
       }
     })();
   }, [requestedAccountId, requestedJob]);
+
+  /** The checklist is a help, not the page: if it can't load, the page works without it. */
+  async function refreshChecklist() {
+    try {
+      setChecklist(await api.ingestChecklist());
+    } catch {
+      setChecklist(null);
+    }
+  }
+
+  /** One file: the single-upload form. Several: the batch (#449). */
+  function chooseFiles(list: FileList | null | undefined) {
+    const files = Array.from(list ?? []);
+    if (files.length > 1) {
+      setBatch((current) => ({ key: (current?.key ?? 0) + 1, files }));
+      setReport(null);
+      setRefusal(null);
+      return;
+    }
+    chooseFile(files[0] ?? null);
+  }
 
   /** The account's name for a job row (#315); its number only if the account is gone. */
   function accountName(id: number): string {
@@ -112,6 +139,7 @@ export default function Ingest() {
       setReport(result as Record<string, unknown>);
       const refreshed = await api.ingestJobs();
       setJobs(refreshed);
+      void refreshChecklist();
     } catch (e: unknown) {
       if (e instanceof UploadRefusedError) {
         setRefusal(e.refusal);
@@ -207,8 +235,7 @@ export default function Ingest() {
   function handleDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setDragActive(false);
-    const dropped = event.dataTransfer.files?.[0];
-    if (dropped) chooseFile(dropped);
+    if (event.dataTransfer.files?.length) chooseFiles(event.dataTransfer.files);
   }
 
   const reportData = report as {
@@ -281,6 +308,19 @@ export default function Ingest() {
 
       {state === "ready" && (
         <div className="wealthOverviewLayout">
+          {checklist ? <UploadChecklistCard checklist={checklist} /> : null}
+          {batch ? (
+            <BatchUpload
+              key={batch.key}
+              files={batch.files}
+              accounts={accounts}
+              onUploaded={() => {
+                void api.ingestJobs().then(setJobs, () => undefined);
+                void refreshChecklist();
+              }}
+              onClose={() => setBatch(null)}
+            />
+          ) : (
           <div className="card">
             <div className="cardTitle">Upload a statement</div>
             {expectation ? (
@@ -331,15 +371,16 @@ export default function Ingest() {
                 >
                   <span className="label">Statement file</span>
                   <p className="ingestDropzoneTitle">
-                    {file ? file.name : "Drag a statement here, or click to browse"}
+                    {file ? file.name : "Drag statements here (one or several), or click to browse"}
                   </p>
                   <p className="ingestDropzoneHint">.csv · .xls · .xlsx</p>
                   <input
                     className="ingestDropzoneInput"
                     type="file"
                     accept=".csv,.xls,.xlsx"
+                    multiple
                     aria-label="Statement file"
-                    onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => chooseFiles(e.target.files)}
                   />
                 </label>
                 <label className="field">
@@ -390,6 +431,7 @@ export default function Ingest() {
               </div>
             )}
           </div>
+          )}
 
           {reportData && (
             <section aria-label="Import report">
