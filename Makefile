@@ -788,6 +788,7 @@ lint: web-deps
 	scripts/test-secure-perms.sh
 	scripts/test-test-instance.sh
 	scripts/test-worktree-prune.sh
+	scripts/test-board.sh
 	scripts/test-pretooluse-guard.sh
 	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests
 
