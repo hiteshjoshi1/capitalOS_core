@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict, Any, List, Optional
 
 from app.schemas.fx import FxStatusFields
@@ -133,8 +133,7 @@ class DashboardSummaryResponse(FxStatusFields):
     cash_percent: float
     data_completeness_indicators: Optional[List[Dict[str, Any]]] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class RiskHolding(BaseModel):
@@ -276,8 +275,7 @@ class NetWorthSinceUpdateResponse(BaseModel):
     basis: Optional[str] = None
     compare_basis: Optional[SinceUpdateCompareBasis] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class NetWorthChangeResponse(BaseModel):
@@ -290,8 +288,7 @@ class NetWorthChangeResponse(BaseModel):
     net_worth_freshness_status: Optional[str] = None
     net_worth_change: Optional[Dict[str, NetWorthChange]] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class StockBreakdownItem(BaseModel):

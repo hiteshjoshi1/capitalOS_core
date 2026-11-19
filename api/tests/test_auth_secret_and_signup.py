@@ -1,8 +1,10 @@
 import os
 import stat
+import warnings
 
 import jwt
 import pytest
+from jwt.warnings import InsecureKeyLengthWarning
 from sqlalchemy import text
 
 from app.services import auth as auth_service
@@ -50,12 +52,15 @@ def test_unset_secret_with_unwritable_data_dir_fails_closed(monkeypatch, tmp_pat
 
 
 def test_token_signed_with_the_old_public_secret_is_rejected(monkeypatch, fresh_generated_secret):
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
-    forged = jwt.encode(
-        {"sub": "1", "type": "access", "username": "demo", "exp": 4102444800},
-        PUBLIC_DEFAULT_SECRET,
-        algorithm="HS256",
-    )
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
+    # The old public secret is short on purpose (it's what an attacker would use).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", InsecureKeyLengthWarning)
+        forged = jwt.encode(
+            {"sub": "1", "type": "access", "username": "demo", "exp": 4102444800},
+            PUBLIC_DEFAULT_SECRET,
+            algorithm="HS256",
+        )
     with pytest.raises(jwt.PyJWTError):
         auth_service.decode_access_token(forged)
 

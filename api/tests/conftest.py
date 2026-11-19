@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timezone
+import sqlite3
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,7 +22,7 @@ os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 os.environ.pop("AUTH_BYPASS_USER_ID", None)
 os.environ.pop("AUTH_BYPASS_ALLOW", None)
 os.environ["AUTH_ALLOW_LEGACY_NULL_OWNERSHIP"] = "0"
-os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 # Forced (not setdefault): a deployment's .env, which compose passes to the test
 # container, may disable signup. Tests that need it off set it via monkeypatch.
 os.environ["AUTH_ALLOW_SIGNUP"] = "1"
@@ -36,6 +37,23 @@ from app.services.login_throttle import login_throttle  # noqa: E402
 from app.valuation_cache import clear_shared_cache  # noqa: E402
 from tests.auth_helpers import signed_in_client  # noqa: E402
 from tests.fx_test_helpers import synthetic_frankfurter  # noqa: E402
+
+
+def _register_sqlite_date_adapters() -> None:
+    """Explicit sqlite3 adapters for date/datetime (#452).
+
+    Python 3.12 deprecated sqlite3's built-in ones, and every bound date/datetime
+    parameter warned (~450k warnings per run). These write the same ISO text the
+    defaults did (`date.isoformat()`, `datetime.isoformat(" ")`), so stored values
+    and test results don't change. No converters: SQLAlchemy doesn't ask sqlite3
+    to parse types (no detect_types), so reads were never using the defaults.
+    Registered on the sqlite3 module, so every SQLite connection in the tests gets them.
+    """
+    sqlite3.register_adapter(date, lambda value: value.isoformat())
+    sqlite3.register_adapter(datetime, lambda value: value.isoformat(" "))
+
+
+_register_sqlite_date_adapters()
 
 connect_args = {}
 if os.environ["DATABASE_URL"].startswith("sqlite"):

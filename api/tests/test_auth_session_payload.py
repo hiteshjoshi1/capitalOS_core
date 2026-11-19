@@ -13,7 +13,7 @@ TOKEN_KEYS = {"access_token", "token_type", "expires_in"}
 def _env(monkeypatch, grace: str = "30") -> None:
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", grace)
 
 
@@ -87,7 +87,7 @@ def test_grace_window_refresh_also_returns_user_and_preferences(client, db_engin
     assert client.post("/auth/refresh").status_code == 200
 
     client.cookies.clear()
-    second = client.post("/auth/refresh", cookies={"capitalos_refresh": original_cookie})
+    second = client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={original_cookie}"})
     assert second.status_code == 200
     body = second.json()
     assert body["user"]["username"] == "grace_payload"
@@ -106,7 +106,7 @@ def test_refresh_failure_paths_unchanged(client, db_engine, monkeypatch):
     assert client.post("/auth/refresh").status_code == 200
 
     client.cookies.clear()
-    reused = client.post("/auth/refresh", cookies={"capitalos_refresh": old_cookie})
+    reused = client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={old_cookie}"})
     assert reused.status_code == 401
     assert reused.json() == {"detail": "invalid or expired refresh token"}
     assert "user" not in reused.json()

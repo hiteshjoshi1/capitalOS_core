@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class AccountCreate(BaseModel):
     name: str
@@ -38,5 +38,4 @@ class AccountOut(BaseModel):
     # value carried forward from that date.
     carried_forward_from: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

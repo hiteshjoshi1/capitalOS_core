@@ -95,7 +95,7 @@ def test_api_refuses_to_start_with_unflagged_bypass(tmp_path):
         {
             "AUTH_BYPASS_USER_ID": "1",
             "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'refuse.db'}",
-            "AUTH_ACCESS_TOKEN_SECRET": "test-access-secret",
+            "AUTH_ACCESS_TOKEN_SECRET": "test-access-secret-at-least-32-bytes",
         }
     )
     result = subprocess.run(
