@@ -12,7 +12,7 @@ def login_env(monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.delenv("AUTH_COOKIE_SECURE", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
 
 def _login(client, db_engine, user_id: int, headers: dict | None = None):
@@ -50,6 +50,6 @@ def test_refresh_keeps_secure_over_https(client, db_engine, login_env):
     name = refresh_cookie_name()
     token = _cookie_value(set_cookie, name)
     client.cookies.clear()
-    res = client.post("/auth/refresh", headers={"X-Forwarded-Proto": "https"}, cookies={name: token})
+    res = client.post("/auth/refresh", headers={"X-Forwarded-Proto": "https", "Cookie": f"{name}={token}"})
     assert res.status_code == 200
     assert _secure(res.headers.get("set-cookie", ""))

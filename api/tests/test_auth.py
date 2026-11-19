@@ -43,7 +43,7 @@ def test_auth_signup_login_me_logout(anon_client, db_engine, monkeypatch):
     client = anon_client  # these checks need a request with no credentials (#154)
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     signup = client.post(
         "/auth/signup",
@@ -99,7 +99,7 @@ def test_auth_signup_login_me_logout(anon_client, db_engine, monkeypatch):
 def test_auth_refresh_rotates_session(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "0")  # disable grace window for strict rotation test
 
     _insert_user_with_password(db_engine, user_id=900, username="refresh_user", password="RefreshPass1!")
@@ -142,7 +142,7 @@ def test_auth_refresh_rotates_session(client, db_engine, monkeypatch):
         assert int(revoked) == 1
 
     client.cookies.clear()
-    reused = client.post("/auth/refresh", cookies={"capitalos_refresh": old_cookie})
+    reused = client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={old_cookie}"})
     assert reused.status_code == 401
 
 
@@ -154,7 +154,7 @@ def test_auth_refresh_grace_window_concurrent(client, db_engine, monkeypatch):
     test_auth_refresh_true_concurrent_race_does_not_log_out below.)"""
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "30")
 
     _insert_user_with_password(db_engine, user_id=901, username="concurrent_user", password="ConcPass1!")
@@ -171,7 +171,7 @@ def test_auth_refresh_grace_window_concurrent(client, db_engine, monkeypatch):
     # Simulate concurrent second request with the original cookie (race condition)
     # This should succeed because the original token was rotated within the grace window
     client.cookies.clear()
-    second = client.post("/auth/refresh", cookies={"capitalos_refresh": original_cookie})
+    second = client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={original_cookie}"})
     assert second.status_code == 200, f"Concurrent refresh should succeed within grace window, got: {second.json()}"
     second_token = second.json()["access_token"]
     assert second_token
@@ -201,7 +201,7 @@ def test_auth_refresh_true_concurrent_race_does_not_log_out(db_engine, monkeypat
     """
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "30")
 
     _insert_user_with_password(db_engine, user_id=904, username="race_user", password="RacePass1!")
@@ -218,7 +218,7 @@ def test_auth_refresh_true_concurrent_race_does_not_log_out(db_engine, monkeypat
     def do_refresh(idx: int) -> None:
         try:
             responses[idx] = TestClient(app).post(
-                "/auth/refresh", cookies={"capitalos_refresh": shared_cookie}
+                "/auth/refresh", headers={"Cookie": f"capitalos_refresh={shared_cookie}"}
             )
         except Exception as exc:  # noqa: BLE001 - surface as an assertion, not a bare thread crash
             errors[idx] = exc
@@ -246,7 +246,7 @@ def test_auth_refresh_grace_window_logout_not_recovered(client, db_engine, monke
     """After explicit logout, even within grace window, refresh with old token should fail."""
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "30")
 
     _insert_user_with_password(db_engine, user_id=902, username="logout_user", password="LogoutPass1!")
@@ -259,7 +259,7 @@ def test_auth_refresh_grace_window_logout_not_recovered(client, db_engine, monke
 
     # Attempt to refresh with old cookie immediately after logout: should fail
     client.cookies.clear()
-    reuse = client.post("/auth/refresh", cookies={"capitalos_refresh": original_cookie})
+    reuse = client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={original_cookie}"})
     assert reuse.status_code == 401, "Logout-revoked tokens must not be recovered"
 
     with db_engine.begin() as conn:
@@ -274,7 +274,7 @@ def test_auth_refresh_grace_window_logout_not_recovered(client, db_engine, monke
 def test_auth_refresh_requires_cookie(client, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     res = client.post("/auth/refresh")
     assert res.status_code == 401
@@ -283,7 +283,7 @@ def test_auth_refresh_requires_cookie(client, monkeypatch):
 def test_auth_refresh_cookie_samesite_can_be_overridden(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_COOKIE_SAMESITE", "lax")
 
     _insert_user_with_password(db_engine, user_id=903, username="samesite_user", password="SameSitePass1!")
@@ -295,7 +295,7 @@ def test_auth_refresh_cookie_samesite_can_be_overridden(client, db_engine, monke
 def test_accounts_are_user_scoped(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=11, username="owner_a", password="OwnerAPass1!")
     _insert_user_with_password(db_engine, user_id=22, username="owner_b", password="OwnerBPass1!")
@@ -326,7 +326,7 @@ def test_accounts_are_user_scoped(client, db_engine, monkeypatch):
 def test_accounts_can_include_legacy_null_owner_when_enabled(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "1")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
     _insert_user_with_password(db_engine, user_id=31, username="legacy_a", password="LegacyAPass1!")
     _insert_user_with_password(db_engine, user_id=32, username="legacy_b", password="LegacyBPass1!")
@@ -414,7 +414,7 @@ def test_auth_refresh_cookie_name_is_per_instance(client, db_engine, monkeypatch
     # each must use, rotate and clear only its own cookie, never the default one.
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "0")
     monkeypatch.setenv("AUTH_REFRESH_COOKIE_NAME", "capitalos_refresh_capitalos-test")
 
@@ -427,11 +427,11 @@ def test_auth_refresh_cookie_name_is_per_instance(client, db_engine, monkeypatch
     client.cookies.clear()
 
     # Only the real app's cookie (another instance's token): not ours, and not cleared.
-    foreign = client.post("/auth/refresh", cookies={"capitalos_refresh": "token-from-another-instance"})
+    foreign = client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh=token-from-another-instance"})
     assert foreign.status_code == 401
     assert "capitalos_refresh=" not in foreign.headers.get("set-cookie", "")
 
-    refreshed = client.post("/auth/refresh", cookies={"capitalos_refresh_capitalos-test": instance_cookie})
+    refreshed = client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh_capitalos-test={instance_cookie}"})
     assert refreshed.status_code == 200
     assert _cookie_value(refreshed.headers.get("set-cookie", ""), "capitalos_refresh_capitalos-test")
 
@@ -443,7 +443,7 @@ def _login(client, username: str, password: str):
 def test_change_password_keeps_this_session_and_signs_out_others(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "0")
     _insert_user_with_password(db_engine, user_id=910, username="pw_user", password="OldPass123!")
 
@@ -457,8 +457,7 @@ def test_change_password_keeps_this_session_and_signs_out_others(client, db_engi
     changed = client.post(
         "/auth/change-password",
         json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
-        headers={"Authorization": f"Bearer {token}"},
-        cookies={"capitalos_refresh": this_cookie},
+        headers={"Authorization": f"Bearer {token}", "Cookie": f"capitalos_refresh={this_cookie}"},
     )
     assert changed.status_code == 200
     assert changed.json() == {"status": "ok", "signed_out_sessions": 1}
@@ -466,8 +465,8 @@ def test_change_password_keeps_this_session_and_signs_out_others(client, db_engi
     assert _login(client, "pw_user", "OldPass123!").status_code == 401
     assert _login(client, "pw_user", "NewPass456!").status_code == 200
     client.cookies.clear()
-    assert client.post("/auth/refresh", cookies={"capitalos_refresh": other_cookie}).status_code == 401
-    assert client.post("/auth/refresh", cookies={"capitalos_refresh": this_cookie}).status_code == 200
+    assert client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={other_cookie}"}).status_code == 401
+    assert client.post("/auth/refresh", headers={"Cookie": f"capitalos_refresh={this_cookie}"}).status_code == 200
 
     with db_engine.begin() as conn:
         algo = conn.execute(text("SELECT password_algo FROM user_credentials WHERE user_id = 910")).scalar_one()
@@ -482,7 +481,7 @@ def test_change_password_rejects_bad_requests(anon_client, db_engine, monkeypatc
     client = anon_client  # these checks need a request with no credentials (#154)
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     _insert_user_with_password(db_engine, user_id=911, username="pw_bad", password="OldPass123!")
     token = _login(client, "pw_bad", "OldPass123!").json()["access_token"]
     auth = {"Authorization": f"Bearer {token}"}
@@ -518,7 +517,7 @@ def test_set_password_script_resets_and_signs_out_everything(client, db_engine, 
 
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     _insert_user_with_password(db_engine, user_id=912, username="forgot_user", password="Forgotten1!")
     assert _login(client, "forgot_user", "Forgotten1!").status_code == 200
     monkeypatch.setattr(script, "SessionLocal", sessionmaker(bind=db_engine))

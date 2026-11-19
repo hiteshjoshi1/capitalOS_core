@@ -164,9 +164,10 @@ def test_uob_parser_selects_latest_balance_row_even_if_middle_candidate():
 def test_uob_parser_falls_back_to_default_currency_when_metadata_missing():
     df = pd.DataFrame(
         [
-            ["Account Number:", "123-456"],
-            ["Account Type:", "One Account"],
-            ["Statement Period:", "01 Mar 2026 to 09 Mar 2026"],
+            # Padded to the header's width: ragged rows are deprecated in pandas (#452).
+            ["Account Number:", "123-456", None, None, None],
+            ["Account Type:", "One Account", None, None, None],
+            ["Statement Period:", "01 Mar 2026 to 09 Mar 2026", None, None, None],
             [
                 "Transaction Date",
                 "Transaction Description",

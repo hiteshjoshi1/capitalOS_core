@@ -268,7 +268,7 @@ def test_timezone_change_marks_history_from_the_first_card_transaction(client: T
 def _login_env(monkeypatch) -> None:
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
     monkeypatch.setenv("TZ", SINGAPORE)
 
 

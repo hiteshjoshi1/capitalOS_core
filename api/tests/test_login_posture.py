@@ -45,7 +45,7 @@ def _login(client, username: str, password: str = PASSWORD, headers: dict | None
 @pytest.fixture()
 def real_auth(monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
-    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 
 
 class _Clock:
