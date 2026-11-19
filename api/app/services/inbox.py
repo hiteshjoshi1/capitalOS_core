@@ -321,7 +321,7 @@ def _card_due_items(db: Session, user: CurrentUser, today: date) -> tuple[list[I
             severity="high" if state.status == "overdue" else "medium",
             title=title,
             detail="; ".join(detail_parts) + ".",
-            action=InboxAction(label="Open card balances", route="/liabilities", params={"card": str(account_id)}),
+            action=InboxAction(label="Open card balances", route="/cards", params={"card": str(account_id)}),
         ))
     all_paid = all(state.status == "paid" for state in states.values())
     return items, all_paid

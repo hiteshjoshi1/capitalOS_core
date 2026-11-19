@@ -398,6 +398,50 @@ describe("WealthOverview", () => {
     expect(screen.getByText("S$ 260.56")).toBeInTheDocument();
   });
 
+  // #450: card debt with no statement balance on file is an estimate; the hero says how much.
+  it("labels the hero with the estimated card debt it subtracts (#450)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    const bootstrap = makeBootstrap(100000, 60000);
+    mockApi.dashboardBootstrap.mockResolvedValue({
+      ...bootstrap,
+      current_net_worth: { ...bootstrap.current_net_worth, estimated_liabilities: 53000 },
+      net_worth: { ...bootstrap.net_worth, estimated_liabilities: 53000 },
+    } as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100000, 100000, 60000) as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    const link = await screen.findByRole("link", { name: "S$ 53K estimated card debt" });
+    expect(link).toHaveAttribute("href", "/cards");
+    expect(link.closest("p")).toHaveTextContent("incl. S$ 53K estimated card debt");
+    // The Liabilities signal card opens the Cards page.
+    expect(screen.getByRole("link", { name: "Open cards" })).toHaveAttribute("href", "/cards");
+  });
+
+  it("shows no estimate label when no card debt is estimated (#450)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    const bootstrap = makeBootstrap(739.44, 260.56);
+    mockApi.dashboardBootstrap.mockResolvedValue({
+      ...bootstrap,
+      current_net_worth: { ...bootstrap.current_net_worth, estimated_liabilities: 0 },
+      net_worth: { ...bootstrap.net_worth, estimated_liabilities: 0 },
+    } as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(739.44, 739.44, 260.56) as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("LIABILITIES")).toBeInTheDocument();
+    expect(screen.queryByText(/estimated card debt/)).not.toBeInTheDocument();
+  });
+
   // #232: one number everywhere. The Liabilities card is the liability in the headline (live:
   // today's, not last month-end's), and both donuts split gross assets, with the headline
   // reconciled under the legend.

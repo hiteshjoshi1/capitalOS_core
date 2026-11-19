@@ -39,7 +39,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /CapitalOS/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wealth" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cards" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
   });

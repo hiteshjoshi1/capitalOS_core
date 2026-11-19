@@ -116,8 +116,9 @@ def test_us_household_dashboard_and_history_agree(client: TestClient, db_engine,
     newest = points[-1]
     assert newest["month"] == "2026-02"
     assert march["net_worth_boundary_at"][:10] == newest["anchor_date"] == "2026-03-01"
-    point = {k: newest[k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
-    assert point == pytest.approx(march["net_worth"], abs=TOL)
+    components = ("cash", "stocks_funds", "crypto", "liabilities", "total")  # what History stores
+    point = {k: newest[k] for k in components}
+    assert point == pytest.approx({k: march["net_worth"][k] for k in components}, abs=TOL)
     # March's card spending is the open month's live liability.
     assert march["current_net_worth"]["liabilities"] > 0
 

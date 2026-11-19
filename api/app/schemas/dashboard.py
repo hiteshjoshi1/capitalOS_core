@@ -10,6 +10,9 @@ class NetWorth(BaseModel):
     stocks_funds: float
     crypto: float
     liabilities: float
+    # #450: the part of ``liabilities`` that is an estimate: cards with no dated
+    # (statement) balance on file count this month's charges only.
+    estimated_liabilities: Optional[float] = None
 
 
 class AssetClassFreshness(BaseModel):
@@ -690,6 +693,8 @@ class WealthTimelineNow(BaseModel):
     stocks_funds: float
     crypto: float
     liabilities: float
+    # #450: as on NetWorth (this "now" point is the live headline's net worth).
+    estimated_liabilities: Optional[float] = None
     as_of: Optional[str] = None
     # Platforms with a statement import this (still open) month (#138).
     uploads: List[str] = Field(default_factory=list)

@@ -169,11 +169,11 @@ export default function AppShell() {
           <span className="coMobileBottomNavLabel">Flow</span>
         </Link>
         <Link
-          className={`coMobileBottomNavItem${location.pathname.startsWith("/liabilities") ? " coMobileBottomNavItemActive" : ""}`}
-          to="/liabilities"
+          className={`coMobileBottomNavItem${location.pathname.startsWith("/cards") ? " coMobileBottomNavItemActive" : ""}`}
+          to="/cards"
         >
           <span className="coMobileBottomNavDot" aria-hidden="true" />
-          <span className="coMobileBottomNavLabel">Liabilities</span>
+          <span className="coMobileBottomNavLabel">Cards</span>
         </Link>
         <Link
           className={`coMobileBottomNavItem${location.pathname.startsWith("/operations") ? " coMobileBottomNavItemActive" : ""}`}

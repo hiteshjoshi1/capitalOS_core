@@ -167,14 +167,9 @@ export default function LiabilitiesOverview() {
   const largestCategory = data && data.categories.length > 0 ? data.categories[0] : null;
   const trendAriaLabel = `${data?.months ?? 12}-month credit card spend trend${selectedCard ? ` for ${selectedCard.card_name}` : ""}`;
 
-  const pageSubtitle = hasLoans
-    ? "Card spend, unusual charges, and loan payments — without unreliable balance estimates."
-    : "Monthly spend, unusual charges, and transaction history — without unreliable balance estimates.";
-
   return (
     <PageShell
-      title="Liabilities"
-      subtitle={pageSubtitle}
+      title="Cards"
       monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {analytics.isLoading ? <div className="card" role="status">Loading…</div> : null}

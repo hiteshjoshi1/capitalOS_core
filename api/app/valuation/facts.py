@@ -54,13 +54,16 @@ from app.valuation.money import D, ZERO, dsum
 _UPPERCASE_SOURCE_CODES = {"DBS", "OCBC", "UOB", "IBKR", "POSB", "CITI", "HSBC", "SCB"}
 
 
-def _serialize_net_worth(components: Dict[str, Decimal]) -> Dict[str, Decimal]:
+def _serialize_net_worth(components: Dict[str, Decimal]) -> Dict[str, Decimal | None]:
     return {
         "total": components["total"],
         "cash": components["cash"],
         "stocks_funds": components["stocks_funds"],
         "crypto": components["crypto"],
         "liabilities": components["liabilities"],
+        # #450: the part of ``liabilities`` that is an estimate (cards with no
+        # dated balance on file: this month's charges only). None when unknown.
+        "estimated_liabilities": components.get("estimated_liabilities"),
     }
 
 
@@ -266,6 +269,12 @@ def _credit_card_liability_component(
     return sum(card["value"] for card in details), {int(card["account_id"]) for card in details}
 
 
+def _estimated_card_liability(details: list[Dict[str, Any]]) -> Decimal:
+    """What the cards with no dated balance on file owe (#450): their ``transactions``
+    method value, this month's net charges only, an estimate."""
+    return dsum(card["value"] for card in details if card["method"] == "transactions")
+
+
 _CASH_FRESHNESS_BALANCE_TYPES = {"cash", "broker_cash", "bank_cash", "stablecoin_cash"}
 
 
@@ -460,19 +469,22 @@ def _networth_components(
     (the wealth rollup) don't have to re-issue the same queries.
     """
     if anchor_ts is None:
-        empty = {"cash": ZERO, "stocks_funds": ZERO, "crypto": ZERO, "liabilities": ZERO, "total": ZERO}
+        empty = {
+            "cash": ZERO,
+            "stocks_funds": ZERO,
+            "crypto": ZERO,
+            "liabilities": ZERO,
+            "estimated_liabilities": ZERO,
+            "total": ZERO,
+        }
         if return_rows:
             return empty, {"positions": [], "nav": [], "cash": []}
         return empty
     assets = _networth_asset_components(
         db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay
     )
-    credit_card_liabilities, _card_account_ids = _credit_card_liability_component(
-        db,
-        anchor_ts,
-        base_currency,
-        current_user_id,
-    )
+    card_details = _credit_card_liability_details(db, anchor_ts, base_currency, current_user_id)
+    credit_card_liabilities = sum(card["value"] for card in card_details)
     cash = assets["cash"]
     stocks_funds = assets["stocks_funds"]
     crypto = assets["crypto"]
@@ -483,6 +495,7 @@ def _networth_components(
         "stocks_funds": stocks_funds,
         "crypto": crypto,
         "liabilities": liabilities,
+        "estimated_liabilities": _estimated_card_liability(card_details),
         "total": total,
     }
     if return_rows:

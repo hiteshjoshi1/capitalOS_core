@@ -220,7 +220,7 @@ def test_the_inbox_reminds_before_and_after_the_due_date_until_paid(db_engine, m
         assert [(i.kind, i.severity, i.title) for i in items] == [
             ("card_due_soon", "medium", "Synthetic Card: SGD 500.00 due 23 Nov (3 days)")
         ]
-        assert (items[0].action.route, items[0].action.params) == ("/liabilities", {"card": str(CARD)})
+        assert (items[0].action.route, items[0].action.params) == ("/cards", {"card": str(CARD)})
 
         items, _ = ib._card_due_items(db, user, D(2026, 11, 25))
         assert [(i.kind, i.severity, i.title) for i in items] == [

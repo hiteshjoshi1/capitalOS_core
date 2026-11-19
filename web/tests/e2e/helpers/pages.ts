@@ -19,7 +19,7 @@ export const MAIN_ROUTES = [
   "/cash-flow/income",
   "/cash-flow/expenses",
   "/cash-flow/map-transactions",
-  "/liabilities",
+  "/cards",
   "/operations",
   "/ingest",
   "/operations/sources",

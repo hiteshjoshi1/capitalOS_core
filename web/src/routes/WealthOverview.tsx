@@ -236,6 +236,8 @@ export default function WealthOverview() {
     ? (bootstrap?.current_net_worth_as_of ?? bootstrap?.net_worth_as_of ?? null)
     : (bootstrap?.net_worth_as_of ?? null);
   const currentFreshness: NetWorthFreshness | null = bootstrap?.current_net_worth_freshness ?? null;
+  // #450: the part of the headline's liabilities that is an estimate (0 or absent: none).
+  const estimatedCardDebt = currentNetWorth?.estimated_liabilities ?? 0;
   // #232: both donuts split gross assets (cash + stocks & funds + crypto), the platform
   // allocation's total; the headline is that minus liabilities, shown under the legend.
   const grossAssets = currentNetWorth
@@ -378,6 +380,20 @@ export default function WealthOverview() {
                 />
               ) : null}
             </div>
+            {/* #450: card debt with no statement balance on file is this month's charges only (an
+                estimate); the headline subtracts it, so say how much of it is estimated. */}
+            {estimatedCardDebt >= 0.5 ? (
+              <p className="coHeroFreshness">
+                incl.{" "}
+                <Link
+                  className="coHeroEstimateLink"
+                  to="/cards"
+                  title="Cards with no statement balance on file count this month's charges only. Enter their statement balances on the Cards page."
+                >
+                  {fmt.formatMoneyCompact(estimatedCardDebt, bootstrap?.base_currency || selectedBaseCurrency)} estimated card debt
+                </Link>
+              </p>
+            ) : null}
 
             {isLive ? (
               <div className="coFreshnessRow" role="group" aria-label="Data freshness by asset class">
@@ -589,8 +605,8 @@ export default function WealthOverview() {
                 <p className="coSignalEyebrow">LIABILITIES</p>
                 <p className="coSignalValue">{formatMoney(liabilities)}</p>
                 <p className="coSignalMeta">What the cards owe, taken off the net worth above.</p>
-                <Link className="wealthInlineLink" to="/liabilities">
-                  Open liabilities
+                <Link className="wealthInlineLink" to="/cards">
+                  Open cards
                 </Link>
               </article>
             </div>

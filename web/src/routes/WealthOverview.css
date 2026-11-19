@@ -365,3 +365,14 @@
     width: 100%;
   }
 }
+
+/* #450: "incl. S$ 53k estimated card debt" under the hero headline. */
+.coHeroEstimateLink {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.coHeroEstimateLink:hover {
+  color: var(--accent);
+}
