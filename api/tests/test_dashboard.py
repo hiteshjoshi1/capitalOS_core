@@ -286,6 +286,75 @@ def test_net_worth_includes_dbs_credit_card_liability_once(db_engine, monkeypatc
     assert float(components["total"]) == pytest.approx(1000.0 - expected_liability)
 
 
+def test_net_worth_exposes_the_estimated_part_of_card_liabilities(client: TestClient, db_engine, monkeypatch):
+    """#450: a card with no dated (statement) balance on file owes this month's charges
+    only, an estimate. net_worth.estimated_liabilities is that part of liabilities, so
+    the Overview hero can say so; a card with a statement balance isn't in it."""
+    _freeze_july_15(monkeypatch)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(830, 'Statement Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1), "
+                "(831, 'Estimate Card', 'UOB', 'CREDIT_CARD', 'SGD', 'SG', 1)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (ts, account_id, amount, type, currency) VALUES "
+                "('2026-07-03 00:00:00+00:00', 830, -50.0, 'EXPENSE', 'SGD'), "
+                "('2026-07-05 00:00:00+00:00', 831, -300.0, 'EXPENSE', 'SGD'), "
+                "('2026-07-06 00:00:00+00:00', 831, -25.5, 'FEE', 'SGD')"
+            )
+        )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=830,
+        as_of=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        currency="SGD",
+        balance_base=-1000,
+        balance_type="credit_balance",
+    )
+
+    with Session(bind=db_engine) as db:
+        components = _networth_components(db, datetime(2026, 7, 15, tzinfo=timezone.utc), "SGD", 1)
+    # Statement card: 1,000 + 50 since (running); estimate card: 300 + 25.50 this month.
+    assert float(components["liabilities"]) == pytest.approx(1050.0 + 325.5)
+    assert float(components["estimated_liabilities"]) == pytest.approx(325.5)
+
+    boot = client.get("/dashboard/bootstrap?month=2026-07&base_currency=SGD")
+    assert boot.status_code == 200, boot.text
+    live = boot.json()["current_net_worth"]
+    assert live["liabilities"] == pytest.approx(1375.5)
+    assert live["estimated_liabilities"] == pytest.approx(325.5)
+    summary = client.get("/dashboard/summary?month=2026-07&base_currency=SGD").json()
+    assert summary["current_net_worth"]["estimated_liabilities"] == pytest.approx(325.5)
+
+
+def test_net_worth_estimated_liabilities_is_zero_with_statement_balances_only(db_engine, monkeypatch):
+    """#450: every card has a statement balance on file: nothing is an estimate."""
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda _date, _base, symbols: {s: 1.0 for s in symbols})
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(840, 'Statement Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
+            )
+        )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=840,
+        as_of=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        currency="SGD",
+        balance_base=-400,
+        balance_type="credit_balance",
+    )
+    with Session(bind=db_engine) as db:
+        components = _networth_components(db, datetime(2026, 7, 15, tzinfo=timezone.utc), "SGD", 1)
+    assert float(components["liabilities"]) == pytest.approx(400.0)
+    assert float(components["estimated_liabilities"]) == 0.0
+
+
 def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_dashboard_data):
     resp = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200

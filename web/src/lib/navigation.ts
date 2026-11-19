@@ -51,9 +51,10 @@ export const APP_SECTIONS: AppSection[] = [
   },
   {
     id: "liabilities",
-    label: "Liabilities",
-    icon: "trending_down",
-    to: "/liabilities",
+    // #450: the page is about credit cards (was "Liabilities" at /liabilities, which redirects).
+    label: "Cards",
+    icon: "credit_card",
+    to: "/cards",
     tabs: [],
   },
   {

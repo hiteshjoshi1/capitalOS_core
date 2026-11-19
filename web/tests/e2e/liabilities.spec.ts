@@ -123,9 +123,9 @@ test.beforeEach(async ({ page }) => {
   await mockLiabilitiesApis(page);
 });
 
-test("desktop: opens Liabilities, filters by card, and sees a charge warning", async ({ page }) => {
-  await page.goto("/liabilities");
-  await expect(page.getByRole("heading", { level: 1, name: "Liabilities" })).toBeVisible();
+test("desktop: opens Cards, filters by card, and sees a charge warning", async ({ page }) => {
+  await page.goto("/cards");
+  await expect(page.getByRole("heading", { level: 1, name: "Cards" })).toBeVisible();
 
   // Hero shows the all-cards total and a visible fee/interest/tax attention banner.
   await expect(page.locator(".coHeroValue")).toHaveText("S$ 49,022");
@@ -157,11 +157,11 @@ test("desktop: opens Liabilities, filters by card, and sees a charge warning", a
   await expect(table.getByRole("row", { name: /SIA/ })).toHaveCount(0);
 });
 
-test("mobile: Liabilities page loads with bottom nav and a scrollable card filter", async ({ page }) => {
+test("mobile: Cards page loads with bottom nav and a scrollable card filter", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/liabilities");
+  await page.goto("/cards");
 
-  await expect(page.getByRole("heading", { level: 1, name: "Liabilities" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Cards" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeVisible();
 
   const allCardsPill = page.getByRole("button", { name: "All cards" });

@@ -735,7 +735,7 @@ def _card_items(
             reason = f"statement balance of {_short_date(as_of)} plus transactions since" if as_of else "statement balance"
         else:
             reason = str(method or "")
-        rows.append(_item(names.get(card, f"Card {card}"), amount, reason, "/liabilities"))
+        rows.append(_item(names.get(card, f"Card {card}"), amount, reason, "/cards"))
     return _items(rows, total)
 
 

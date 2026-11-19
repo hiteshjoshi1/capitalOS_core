@@ -50,6 +50,14 @@ EXACT = 0.0
 SUM_TOL = 1e-6
 TOL = 0.01  # one cent
 
+# The net worth components History stores; a dashboard net_worth also carries
+# estimated_liabilities (#450), which History doesn't.
+_STORED = ("cash", "stocks_funds", "crypto", "liabilities", "total")
+
+
+def _stored(net_worth: dict) -> dict:
+    return {k: net_worth[k] for k in _STORED}
+
 
 @pytest.fixture()
 def household(client: TestClient, db_engine, monkeypatch):
@@ -267,8 +275,8 @@ def test_history_points_equal_the_dashboard_for_each_month(household):
     assert set(points) == {"2025-10", "2025-11", "2025-12", "2026-01", "2026-02"}
     for month in ("2025-12", "2026-01", "2026-02"):
         summary = _summary(household, month)
-        point = {k: points[month][k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
-        assert point == pytest.approx(summary["net_worth"], abs=EXACT), month
+        point = {k: points[month][k] for k in _STORED}
+        assert point == pytest.approx(_stored(summary["net_worth"]), abs=EXACT), month
     change = _summary(household, "2026-02")["net_worth_change"]["vs_prev_month"]["abs"]
     assert change == pytest.approx(points["2026-02"]["total"] - points["2026-01"]["total"], abs=SUM_TOL)
 
@@ -289,8 +297,8 @@ def test_first_of_month_dashboard_and_history_agree(household_first):
     newest = points[-1]
     assert newest["month"] == "2026-03"
     assert summary["net_worth_boundary_at"][:10] == newest["anchor_date"]
-    point = {k: newest[k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
-    assert point == pytest.approx(summary["net_worth"], abs=EXACT)
+    point = {k: newest[k] for k in _STORED}
+    assert point == pytest.approx(_stored(summary["net_worth"]), abs=EXACT)
 
 
 def test_first_of_month_last_month_is_closed_everywhere(household_first):
@@ -432,8 +440,8 @@ def test_history_after_writes_equals_a_fresh_recompute(household, db_engine, mon
     recomputed = _points(_timeline(household, backfill=True))  # "Generate history": every month recomputed
     assert lazily == recomputed
     for month in ("2026-01", "2026-02"):
-        point = {k: lazily[month][k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
-        assert point == pytest.approx(_summary(household, month)["net_worth"], abs=EXACT), month
+        point = {k: lazily[month][k] for k in _STORED}
+        assert point == pytest.approx(_stored(_summary(household, month)["net_worth"]), abs=EXACT), month
     # The writes did reach History (else this proves nothing): the crypto
     # snapshot and the Flex re-import change January, the statement February.
     assert [m for m in before if before[m]["total"] != recomputed[m]["total"]] == ["2026-01", "2026-02"]

@@ -211,13 +211,13 @@ describe("AppShell", () => {
     expect(screen.getByRole("link", { name: "Map Transactions" })).toBeInTheDocument();
   });
 
-  it("renders no sub-tabs on the merged liabilities page", () => {
+  it("renders no sub-tabs on the merged Cards page", () => {
     render(
       <ThemeProvider>
-        <MemoryRouter initialEntries={["/liabilities"]}>
+        <MemoryRouter initialEntries={["/cards"]}>
           <Routes>
             <Route element={<AppShell />}>
-              <Route path="/liabilities" element={<div>Liabilities</div>} />
+              <Route path="/cards" element={<div>Cards</div>} />
             </Route>
           </Routes>
         </MemoryRouter>
@@ -226,7 +226,7 @@ describe("AppShell", () => {
 
     expect(screen.queryByRole("link", { name: "Credit Cards" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Loans" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Liabilities tabs" })).toBeEmptyDOMElement();
+    expect(screen.queryByRole("navigation", { name: "Cards tabs" })).toBeEmptyDOMElement();
   });
 
   it("renders the wealth page month and currency controls inside the shell top bar", async () => {
@@ -448,6 +448,15 @@ describe("AppShell on a phone-width screen (#239)", () => {
     expect(within(nav).getByRole("link", { name: "Flow" })).toHaveAttribute("href", "/cash-flow");
     expect(within(nav).queryByRole("link", { name: "Cash" })).not.toBeInTheDocument();
   });
+
+  it("labels the card page's bottom tab Cards and marks it active there (#450)", () => {
+    renderPhoneShell("/cards", <div>Cards Content</div>);
+    const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+    const cards = within(nav).getByRole("link", { name: "Cards" });
+    expect(cards).toHaveAttribute("href", "/cards");
+    expect(cards).toHaveClass("coMobileBottomNavItemActive");
+    expect(within(nav).queryByRole("link", { name: "Liabilities" })).not.toBeInTheDocument();
+  });
 });
 
 describe("Placeholder route smoke tests", () => {
@@ -455,7 +464,7 @@ describe("Placeholder route smoke tests", () => {
     { path: "/wealth", component: <WealthOverview />, heading: "Wealth Overview" },
     { path: "/cash-flow", component: <CashFlowDetail />, heading: "Cash Flow Overview" },
     { path: "/risk", component: <WealthRisk />, heading: "Wealth Risk" },
-    { path: "/liabilities", component: <LiabilitiesOverview />, heading: "Liabilities" },
+    { path: "/cards", component: <LiabilitiesOverview />, heading: "Cards" },
     { path: "/operations", component: <OperationsOverview />, heading: "Data Hub" },
   ];
 

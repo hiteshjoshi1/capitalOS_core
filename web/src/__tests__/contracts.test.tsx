@@ -270,7 +270,7 @@ describe("frontend contracts", () => {
     const sidebar = screen.getByRole("complementary", { name: "Main navigation" });
     expect(within(sidebar).getByRole("link", { name: "Wealth" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("link", { name: "Cards" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
     expect(screen.getByText("Wealth Content")).toBeInTheDocument();

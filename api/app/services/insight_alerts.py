@@ -189,7 +189,7 @@ def recurring_item(payment: Any, base: str) -> Optional[InboxItem]:
             severity="low",
             title=f"New recurring charge: {merchant}",
             detail=f"{_money(amount, base)} this month on {payment.card_name}; it repeats {payment.cadence}.",
-            action=InboxAction(label="Open card", route="/liabilities"),
+            action=InboxAction(label="Open card", route="/cards"),
         )
     if typical > 0 and amount >= typical * (1 + RECURRING_UP_PCT / 100) and amount - typical >= RECURRING_UP_MIN:
         return InboxItem(
@@ -198,7 +198,7 @@ def recurring_item(payment: Any, base: str) -> Optional[InboxItem]:
             severity="low",
             title=f"{merchant} charged more than usual",
             detail=f"{_money(amount, base)} this month vs a usual {_money(typical, base)} on {payment.card_name}.",
-            action=InboxAction(label="Open card", route="/liabilities"),
+            action=InboxAction(label="Open card", route="/cards"),
         )
     return None
 

@@ -48,7 +48,7 @@ def test_household_parts_name_their_items_and_add_up(mid: TestClient):
     assert broker["items"][0]["label"] == "RELIANCE" and broker["items"][0]["reason"] == "bought"
     # The card part names the household's card, with a link to fix it.
     cards = parts["card_balances"]["items"]
-    assert cards and all(item["link"] == "/liabilities" for item in cards)
+    assert cards and all(item["link"] == "/cards" for item in cards)
     assert all(item["label"] and item["reason"] for item in cards)
     # Other always ends with what it can't name, so it still adds up.
     other = parts["other"]

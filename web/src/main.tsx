@@ -9,6 +9,7 @@ import WealthOverview from "./routes/WealthOverview.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
 import { AuthProvider } from "./context/AuthContext.tsx";
 import RequireAuth from "./components/RequireAuth.tsx";
+import RedirectKeepingSearch from "./components/RedirectKeepingSearch.tsx";
 import Login from "./routes/Login.tsx";
 import Signup from "./routes/Signup.tsx";
 import {
@@ -60,10 +61,13 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/cash-flow/expenses" element={<CashFlowDetail />} />
                 <Route path="/cash-flow/map-transactions" element={<CashFlowMapping />} />
                 <Route path="/cash-flow/mapping" element={<Navigate to="/cash-flow/map-transactions" replace />} />
-                <Route path="/liabilities" element={<LiabilitiesOverview />} />
-                <Route path="/liabilities/credit-cards" element={<Navigate to="/liabilities" replace />} />
-                <Route path="/credit-cards" element={<Navigate to="/liabilities" replace />} />
-                <Route path="/loans" element={<Navigate to="/liabilities" replace />} />
+                {/* #450: the page is about credit cards, so it is "Cards" at /cards. The old paths
+                    (bookmarks, links in older Inbox items) redirect, query string kept. */}
+                <Route path="/cards" element={<LiabilitiesOverview />} />
+                <Route path="/liabilities" element={<RedirectKeepingSearch to="/cards" />} />
+                <Route path="/liabilities/credit-cards" element={<RedirectKeepingSearch to="/cards" />} />
+                <Route path="/credit-cards" element={<RedirectKeepingSearch to="/cards" />} />
+                <Route path="/loans" element={<RedirectKeepingSearch to="/cards" />} />
                 <Route path="/alerts" element={<Alerts />} />
                 <Route path="/operations" element={<OperationsOverview />} />
                 <Route path="/operations/sources" element={<AccountsSources />} />

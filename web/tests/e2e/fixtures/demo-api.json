@@ -1655,7 +1655,8 @@
     "cash": 1974805,
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
-    "liabilities": 53512.9
+    "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9
    },
    "current_net_worth_freshness": {
     "stocks": {
@@ -1687,7 +1688,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.5421250002,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "current_stock_exposure_total": 7568871.834718291,
    "current_crypto_exposure_total": 1882638.75,
@@ -2122,7 +2124,8 @@
      "cash": 1946357.1435,
      "stocks_funds": 6536003.26025146,
      "crypto": 1856789.5421250002,
-     "liabilities": 29741.5
+     "liabilities": 29741.5,
+     "estimated_liabilities": 29741.5
     },
     "baseline_missing": false
    },
@@ -2136,7 +2139,8 @@
      "cash": 1974805,
      "stocks_funds": 7568871.834718291,
      "crypto": 1882638.75,
-     "liabilities": 53512.9
+     "liabilities": 53512.9,
+     "estimated_liabilities": 53512.9
     },
     "baseline_missing": false
    },
@@ -2342,25 +2346,25 @@
         "label": "DUMMY - Amex Platinum",
         "amount": 19120,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        },
        {
         "label": "DUMMY - DBS Credit Card",
         "amount": 6882,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        },
        {
         "label": "DUMMY - Citi Prestige",
         "amount": 2642,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        },
        {
         "label": "DUMMY - UOB Credit Card",
         "amount": 1097.5,
         "reason": "no statement balance: estimated from this month's transactions. Enter its statement balance",
-        "link": "/liabilities"
+        "link": "/cards"
        }
       ]
      },
@@ -2666,6 +2670,7 @@
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
     "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9,
     "as_of": "2026-11-10T22:13:44+08:00",
     "uploads": [
      "CITI"
@@ -2688,6 +2693,7 @@
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
     "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9,
     "as_of": "2026-11-10T22:13:44+08:00",
     "uploads": [
      "CITI"
@@ -2825,7 +2831,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.5421250002,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "top_holdings": [
     {
@@ -3136,7 +3143,8 @@
     "cash": 1974805,
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
-    "liabilities": 53512.9
+    "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9
    },
    "net_worth_boundary_at": "2026-11-10T22:13:43+08:00",
    "currency_exposure": {
@@ -5189,7 +5197,8 @@
     "cash": 1974805,
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
-    "liabilities": 53512.9
+    "liabilities": 53512.9,
+    "estimated_liabilities": 53512.9
    },
    "current_net_worth_freshness": {
     "stocks": {
@@ -5221,7 +5230,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.5421250002,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "geography": [
     {
@@ -10538,7 +10548,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.542125,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "top_holdings": [
     {
@@ -10849,7 +10860,8 @@
     "cash": 1946357.1435,
     "stocks_funds": 6536003.26025146,
     "crypto": 1856789.542125,
-    "liabilities": 29741.5
+    "liabilities": 29741.5,
+    "estimated_liabilities": 29741.5
    },
    "net_worth_boundary_at": "2026-11-01T00:00:00+00:00",
    "currency_exposure": {
