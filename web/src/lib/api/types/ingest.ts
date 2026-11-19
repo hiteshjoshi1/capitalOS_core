@@ -72,3 +72,25 @@ export type UploadDetect = {
   suggested_account_id: number | null;
   statement_last4: string | null;
 };
+
+/** GET /ingest/checklist (#449, V23): this calendar month's statement uploads. A source is
+ *  `done` once a statement for it was imported this month or it has data dated this month.
+ *  Not-done sources first; Flex, wallets and feeds refresh themselves and aren't listed. */
+export type UploadChecklistSource = {
+  source_key: string;
+  account_id: number;
+  label: string;
+  platform: string | null;
+  kind: string;
+  done: boolean;
+  last_import_date: string | null; // YYYY-MM-DD
+  last_data_date: string | null; // YYYY-MM-DD
+  overdue: boolean;
+};
+
+export type UploadChecklist = {
+  month: string; // YYYY-MM
+  done: number;
+  total: number;
+  sources: UploadChecklistSource[];
+};

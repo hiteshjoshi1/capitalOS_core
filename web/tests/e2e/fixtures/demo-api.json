@@ -10998,5 +10998,125 @@
    "holdings_no_dividend_history": 32,
    "data_as_of": null
   }
+ },
+ "/ingest/checklist": {
+  "status": 200,
+  "body": {
+   "month": "2026-11",
+   "done": 10,
+   "total": 10,
+   "sources": [
+    {
+     "source_key": "account:10",
+     "account_id": 10,
+     "label": "DUMMY - Amex Platinum",
+     "platform": "AMEX",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-07",
+     "overdue": false
+    },
+    {
+     "source_key": "account:11",
+     "account_id": 11,
+     "label": "DUMMY - Citi Prestige",
+     "platform": "CITI",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": "2026-11-04",
+     "last_data_date": "2026-11-07",
+     "overdue": false
+    },
+    {
+     "source_key": "account:8",
+     "account_id": 8,
+     "label": "DUMMY - DBS Credit Card",
+     "platform": "DBS",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": "2026-10-31",
+     "last_data_date": "2026-11-07",
+     "overdue": false
+    },
+    {
+     "source_key": "account:2",
+     "account_id": 2,
+     "label": "DUMMY - DBS Savings",
+     "platform": "DBS",
+     "kind": "bank_statement",
+     "done": true,
+     "last_import_date": "2026-10-21",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:6",
+     "account_id": 6,
+     "label": "DUMMY - DBS Vickers SGX",
+     "platform": "DBS_VICKERS",
+     "kind": "broker_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:5",
+     "account_id": 5,
+     "label": "DUMMY - IBKR Global",
+     "platform": "IBKR",
+     "kind": "broker_statement",
+     "done": true,
+     "last_import_date": "2026-10-27",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:3",
+     "account_id": 3,
+     "label": "DUMMY - OCBC 360",
+     "platform": "OCBC",
+     "kind": "bank_statement",
+     "done": true,
+     "last_import_date": "2026-10-23",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:7",
+     "account_id": 7,
+     "label": "DUMMY - SG Money Market Fund",
+     "platform": "DBS",
+     "kind": "broker_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    },
+    {
+     "source_key": "account:9",
+     "account_id": 9,
+     "label": "DUMMY - UOB Credit Card",
+     "platform": "UOB",
+     "kind": "card_statement",
+     "done": true,
+     "last_import_date": null,
+     "last_data_date": "2026-11-06",
+     "overdue": false
+    },
+    {
+     "source_key": "account:4",
+     "account_id": 4,
+     "label": "DUMMY - UOB One",
+     "platform": "UOB",
+     "kind": "bank_statement",
+     "done": true,
+     "last_import_date": "2026-10-25",
+     "last_data_date": "2026-11-10",
+     "overdue": false
+    }
+   ]
+  }
  }
 }

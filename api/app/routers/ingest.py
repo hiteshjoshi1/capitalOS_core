@@ -23,7 +23,8 @@ from app.ingestion.account_checks import (
     statement_identity,
 )
 from app.ingestion.signature import compute_format_signature
-from app.schemas.ingest import UploadDetectOut
+from app.schemas.ingest import UploadChecklistOut, UploadDetectOut
+from app.services.upload_checklist import monthly_upload_checklist
 from app.ingestion.undo import RemovalRefused, remove_import_job
 from pydantic import BaseModel
 from app.models.import_job import ImportJob
@@ -228,6 +229,15 @@ def _check_as_of(as_of: date | None) -> None:
     # One day of slack: the browser's local "today" can be ahead of the app timezone.
     if as_of is not None and as_of > app_today() + timedelta(days=1):
         raise HTTPException(status_code=422, detail="as_of can't be in the future")
+
+
+@router.get("/checklist", response_model=UploadChecklistOut)
+def ingest_checklist(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """This month's uploads (#449, V23): each statement source and whether it's done this month."""
+    return monthly_upload_checklist(db, current_user.id)
 
 
 @router.post("/detect", response_model=UploadDetectOut)

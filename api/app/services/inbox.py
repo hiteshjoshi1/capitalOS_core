@@ -10,6 +10,8 @@ header bell (#317) and the Alerts page can't disagree:
   doesn't publish (#290, D-30);
 - scheduled jobs failing (job_runs, #156);
 - transactions of this or last month without a category (Map transactions);
+- this month's statement uploads, while any is still to do ("This month's uploads: 3 of 9",
+  #449; ``app.services.upload_checklist``);
 - card payments due within 5 days or overdue, from the due date a statement printed
   (#352, D-94), until the card's payments since the statement cover it;
 - backups: no verified backup in 48 hours, or the last daily run failed (#399, D-111);
@@ -33,6 +35,7 @@ from app.schemas.inbox import InboxAction, InboxItem, InboxResponse
 from app.services import data_hub
 from app.services.backup_status import backup_status
 from app.services.insight_alerts import insight_items
+from app.services.upload_checklist import monthly_upload_checklist
 from app.services.source_freshness import (
     KIND_ACCOUNT_STATEMENT,
     KIND_BANK_STATEMENT,
@@ -62,6 +65,7 @@ KIND_ORDER = {
             "fx_gap",
             "fx_unsupported",
             "unmapped_transactions",
+            "monthly_uploads",
             "month_closed_stale",
             "concentration",
             "unusual_move",
@@ -275,6 +279,24 @@ def _unmapped_items(db: Session, user: CurrentUser, today: date) -> list[InboxIt
     )]
 
 
+def _checklist_items(checklist: dict[str, Any]) -> tuple[list[InboxItem], Optional[str]]:
+    """This month's uploads (#449): one low item while any is still to do, else an all-good line."""
+    total, done = int(checklist["total"]), int(checklist["done"])
+    if total == 0:
+        return [], None
+    if done == total:
+        return [], f"All {_plural(total, 'statement')} uploaded this month"
+    todo = [s["label"] for s in checklist["sources"] if not s["done"]]
+    return [InboxItem(
+        id="monthly_uploads",
+        kind="monthly_uploads",
+        severity="low",
+        title=f"This month's uploads: {done} of {total}",
+        detail="Still to upload: " + ", ".join(todo),
+        action=InboxAction(label="Upload statements", route="/ingest"),
+    )], None
+
+
 def _money(amount: float, currency: str) -> str:
     return f"{currency} {amount:,.2f}"
 
@@ -382,6 +404,9 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
     fx_items, fx_ok = _safe(lambda: _fx_items(db, user, _saved_base_currency(db, user.id)), ([], False))
     card_items, cards_paid = _safe(lambda: _card_due_items(db, user, today), ([], False))
     backup_items, backup_ok = _safe(_backup_items, ([], None))
+    checklist_items, uploads_ok = _safe(
+        lambda: _checklist_items(monthly_upload_checklist(db, user.id, today, freshness)), ([], None)
+    )
     items = (
         source_items
         + _safe(lambda: _import_items(db, user), [])
@@ -390,6 +415,7 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
         + job_items
         + _safe(lambda: _unmapped_items(db, user, today), [])
         + card_items
+        + checklist_items
         + backup_items
         + _safe(lambda: insight_items(db, user, _saved_base_currency(db, user.id), _safe), [])
     )
@@ -409,6 +435,8 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
         all_good.append("Card payments up to date")
     if summary.import_health.pending_count == 0 and summary.import_health.last_import_at:
         all_good.append("No uploads waiting")
+    if uploads_ok:
+        all_good.append(uploads_ok)
     if backup_ok:
         all_good.append(backup_ok)
 

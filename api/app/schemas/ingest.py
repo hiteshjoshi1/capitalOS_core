@@ -61,3 +61,28 @@ class UploadDetectOut(BaseModel):
     candidate_account_ids: List[int] = []
     suggested_account_id: Optional[int] = None
     statement_last4: Optional[str] = None
+
+
+class UploadChecklistSource(BaseModel):
+    """One statement source on this month's checklist (#449). `done`: imported this month, or has
+    data dated this month. `last_import_date`: its newest successful upload (app timezone)."""
+
+    source_key: str
+    account_id: int
+    label: str
+    platform: Optional[str] = None
+    kind: str
+    done: bool
+    last_import_date: Optional[str] = None
+    last_data_date: Optional[str] = None
+    overdue: bool = False
+
+
+class UploadChecklistOut(BaseModel):
+    """GET /ingest/checklist (#449, V23): the statements to upload this calendar month (`month`,
+    YYYY-MM), not-done first. Flex, wallets and feeds refresh themselves and aren't listed."""
+
+    month: str
+    done: int
+    total: int
+    sources: List[UploadChecklistSource] = []
