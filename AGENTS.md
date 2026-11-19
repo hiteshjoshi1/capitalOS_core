@@ -54,7 +54,8 @@ second backlog, TODO list or roadmap file.
   `make up`, `make web-up`, `make db-migrate` there touch only it; `make instance-drop` removes
   it). In the main checkout, stack-changing targets refuse on any branch but `main`.
 - **The PR description says `Closes #<n>`**, so the merge closes the issue.
-- **Status moves with the work** (`scripts/board.sh move <n> "<Status>"`):
+- **Status moves with the work** (`scripts/board.sh move <n> "<Status>"`; several issues at once:
+  `board.sh move <n> <n> ... "<Status>"`, one GitHub call, #453):
 
   | Status | When |
   | --- | --- |
