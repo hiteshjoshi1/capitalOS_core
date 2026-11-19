@@ -25,6 +25,10 @@ updates:
       # (the wallet connection the Crypto Wallets page uses) requires ^1.99 (#95).
       - dependency-name: "@solana/web3.js"
         update-types: ["version-update:semver-major"]
+      # @playwright/test must equal the Playwright image pinned in tools/Dockerfile (scripts/e2e-smoke.sh
+      # refuses a mismatch, so a lone npm bump fails CI). Dependabot can't group across ecosystems here,
+      # so it bumps only the image (the /tools block below); bump @playwright/test on that same PR (#451).
+      - dependency-name: "@playwright/test"
 
   - package-ecosystem: pip
     directory: /api
@@ -100,7 +104,9 @@ updates:
       - dependency-name: grafana/grafana
         update-types: ["version-update:semver-major"]
 
-  # Images run outside compose (MCP server, Trivy): see tools/Dockerfile.
+  # Images run outside compose (MCP server, Trivy, Playwright): see tools/Dockerfile.
+  # A Playwright image bump fails the smoke job until web/package.json's @playwright/test (and the
+  # lock) is bumped to the same version on that PR: `cd web && npm i -D -E @playwright/test@<ver>` (#451).
   - package-ecosystem: docker
     directory: /tools
     schedule:
