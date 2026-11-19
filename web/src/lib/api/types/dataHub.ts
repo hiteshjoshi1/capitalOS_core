@@ -123,6 +123,8 @@ export type InboxItem = {
     | "unusual_move"
     | "recurring_new"
     | "recurring_up"
+    // #449 (V23): "This month's uploads: N of M", while any statement is still to upload.
+    | "monthly_uploads"
     | string;
   severity: "high" | "medium" | "low";
   title: string;

@@ -18,6 +18,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       ingestJob: vi.fn(),
       ingestUpload: vi.fn(),
       ingestDetect: vi.fn(),
+      ingestChecklist: vi.fn(),
       registerIngestSignature: vi.fn(),
       removeIngestJob: vi.fn(),
     },
@@ -100,6 +101,7 @@ describe("Statement date helpers (#141)", () => {
 describe("Ingest", () => {
   beforeEach(() => {
     mockApi.ingestJobs.mockResolvedValue([]);
+    mockApi.ingestChecklist.mockResolvedValue({ month: "2026-11", done: 0, total: 0, sources: [] });
     mockApi.ingestDetect.mockResolvedValue({
       recognised: false,
       parser_key: null,
