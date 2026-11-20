@@ -22,5 +22,5 @@ langgraph-sdk==0.4.9
 langsmith==0.14.12
 ormsgpack==1.13.0
 uuid-utils==0.17.1
-websockets==16.1.1
+websockets==17.4
 xxhash==4.0.2
