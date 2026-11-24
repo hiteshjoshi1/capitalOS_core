@@ -376,10 +376,15 @@ def _bucket_magnitude(row, base_amount: float) -> float:
     return base_amount if _cash_flow_bucket(row) == "income" else -base_amount
 
 
-def _is_recurring_row(row, merchant_months: dict[tuple[str, str], set[str]]) -> bool:
+def _is_recurring_row(row, merchant_charges: dict[tuple[str, str], dict[str, list[float]]], month: str) -> bool:
+    """Cash Flow's "Recurring vs. one-off" (#473, V20): a row is recurring when its
+    counterparty is a regular repeat over the trailing window (once a month, every month,
+    a stable amount: ``detect_recurring_cadence``, the Cards' rule, #266), or when its
+    category or text names a kind that recurs (rent, salary, insurance, ...). The same
+    merchant in two months is not enough: groceries, taxis and shops repeat too."""
     merchant = _normalize_text(row.get("merchant_counterparty"))
     bucket = _cash_flow_bucket(row)
-    if merchant and bucket and len(merchant_months.get((bucket, merchant), set())) >= 2:
+    if merchant and bucket and detect_recurring_cadence(merchant_charges.get((bucket, merchant), {}), month):
         return True
     features = _row_features(row)
     return any(keyword in features for keyword in RECURRING_KEYWORDS)
@@ -411,7 +416,8 @@ def _month_index(month: str) -> int:
 
 
 def detect_recurring_cadence(charges_by_month: dict[str, list[float]], month: str) -> str | None:
-    """Whether one merchant's card charges are a real repeat (#266), and its cadence.
+    """Whether one merchant's card charges are a real repeat (#266), and its cadence. Cash
+    Flow's "Recurring vs. one-off" uses the same rule for a counterparty's rows (#473).
 
     ``charges_by_month``: ``YYYY-MM`` -> the positive charge amounts in that month, over the
     trailing window. A real repeat is billed like a subscription:
@@ -520,15 +526,17 @@ def _month_metrics(rows, base_currency: str) -> dict[str, dict[str, float | None
     return metrics
 
 
-def _merchant_month_sets(rows) -> dict[tuple[str, str], set[str]]:
-    months: dict[tuple[str, str], set[str]] = defaultdict(set)
+def _merchant_charges_by_month(rows) -> dict[tuple[str, str], dict[str, list[float]]]:
+    """(bucket, counterparty) -> ``YYYY-MM`` -> the row amounts (magnitudes, in the row's own
+    currency) that month: what ``detect_recurring_cadence`` judges a repeat on (#473)."""
+    charges: dict[tuple[str, str], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
         bucket = _cash_flow_bucket(row)
         merchant = _normalize_text(row.get("merchant_counterparty"))
         if bucket is None or not merchant:
             continue
-        months[(bucket, merchant)].add(_month_key(row["ts"]))
-    return months
+        charges[(bucket, merchant)][_month_key(row["ts"])].append(abs(float(row["amount"] or 0)))
+    return charges
 
 
 def _cash_flow_trend(lookback_rows, month: str, base_currency: str) -> list[CashFlowTrendPoint]:
@@ -847,7 +855,7 @@ def _analytics_for_month(
     prior_month = _month_key(_add_months(_parse_month(month), -1))
     prior_rows = [row for row in lookback_rows if _month_key(row["ts"]) == prior_month]
     prior_month_rates = _build_row_rate_map(prior_rows, base_currency)
-    merchant_months = _merchant_month_sets(lookback_rows)
+    merchant_charges = _merchant_charges_by_month(lookback_rows)
 
     outflow_categories: dict[str, float] = defaultdict(float)
     inflow_categories: dict[str, float] = defaultdict(float)
@@ -870,7 +878,7 @@ def _analytics_for_month(
         base_amount = _row_base_amount(row, base_currency, current_month_rates)
         amount = _bucket_magnitude(row, base_amount)
         category = row["resolved_category"] or "Uncategorized"
-        is_recurring = _is_recurring_row(row, merchant_months)
+        is_recurring = _is_recurring_row(row, merchant_charges, month)
         recurring_label = "Recurring" if is_recurring else "One-off"
 
         if bucket == "income":

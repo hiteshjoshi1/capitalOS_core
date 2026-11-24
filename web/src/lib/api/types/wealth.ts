@@ -557,7 +557,7 @@ export type CashDeposits = {
   snapshot_stablecoin_total?: number | null;
   delta_abs?: number | null;
   delta_pct?: number | null;
-  trend?: MiniTrendPoint[];
+  trend?: CashTrendPoint[];
   currency_breakdown?: Array<{
     currency: string;
     current_value: number;
@@ -571,6 +571,31 @@ export type CashDeposits = {
   accounts?: CashAccountRow[];
   /** #397 (U14): foreign-currency cash revalued from the compare point to now. */
   fx_revaluation?: CashFxRevaluation | null;
+  /** #473 (V14): the same page without the stablecoins (bank and broker cash, net worth's cash).
+   * The fields above keep the stablecoins in. */
+  bank_broker?: CashBankBrokerView | null;
+};
+
+/** #473 (V14): bank and broker cash, the cash net worth counts (stablecoins are Crypto there). */
+export type CashBankBrokerView = {
+  total: number;
+  snapshot_total: number;
+  delta_abs: number;
+  delta_pct?: number | null;
+  items: Array<{ source: string; value: number; percent: number }>;
+  currency_breakdown: Array<{
+    currency: string;
+    current_value: number;
+    snapshot_value: number;
+    delta_abs: number;
+    delta_pct?: number | null;
+  }>;
+  snapshot_missing: boolean;
+};
+
+/** A Cash page trend point (#473): `bank_broker_value` is the month without the stablecoins. */
+export type CashTrendPoint = MiniTrendPoint & {
+  bank_broker_value?: number | null;
 };
 
 /** One cash account on the Cash page (#397). `stale`: overdue on Data Hub (live month only). */

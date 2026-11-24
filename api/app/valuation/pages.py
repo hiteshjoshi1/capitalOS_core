@@ -66,7 +66,7 @@ from app.valuation.holdings import (
     _top_movers_from_holdings,
 )
 from app.valuation.prices import _quote_stale_days
-from app.valuation.state import _effective_as_of, _positions_coverage_as_of, _snapshot_freshness
+from app.valuation.state import CASH_SCOPE_NET_WORTH, _effective_as_of, _positions_coverage_as_of, _snapshot_freshness
 from app.services.source_freshness import source_freshness
 from app.valuation.money import D, ZERO, dsum, float_edge
 
@@ -798,12 +798,20 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
     # part of each total is reported, so the page can say so (#232).
     snapshot_stablecoins = _stablecoin_cash_balances(db, compare_anchor, base_currency, current_user_id)
     current_stablecoins = _stablecoin_cash_balances(db, effective_anchor, base_currency, current_user_id)
-    snapshot_balances = _cash_balances(db, compare_anchor, base_currency, current_user_id) + snapshot_stablecoins
-    current_balances = _cash_balances(db, effective_anchor, base_currency, current_user_id) + current_stablecoins
+    snapshot_cash = _cash_balances(db, compare_anchor, base_currency, current_user_id)
+    current_cash = _cash_balances(db, effective_anchor, base_currency, current_user_id)
+    snapshot_balances = snapshot_cash + snapshot_stablecoins
+    current_balances = current_cash + current_stablecoins
     current_total = _sum_balances(current_balances)
     snapshot_total = _sum_balances(snapshot_balances)
     delta_abs = current_total - snapshot_total
     snapshot_cash_as_of = _effective_as_of(db, compare_anchor, current_user_id)
+    # #473 (V14): the page's headline is bank and broker cash, net worth's cash; the
+    # stablecoins are their own line. The fields above keep their meaning (stablecoins in).
+    bank_broker_total = _sum_balances(current_cash)
+    bank_broker_snapshot = _sum_balances(snapshot_cash)
+    bank_broker_delta = bank_broker_total - bank_broker_snapshot
+    bank_broker_items = _cash_deposits(db, effective_anchor, base_currency, current_user_id, scope=CASH_SCOPE_NET_WORTH)
     return {
         "total": payload["total"],
         "items": payload["items"],
@@ -834,6 +842,15 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
         # alone, per currency; the same window and figure as the bridge's FX part for
         # foreign-currency cash.
         "fx_revaluation": _cash_fx_revaluation(db, current_user_id, base_currency, compare_anchor, effective_anchor),
+        "bank_broker": {
+            "total": bank_broker_total,
+            "snapshot_total": bank_broker_snapshot,
+            "delta_abs": bank_broker_delta,
+            "delta_pct": (bank_broker_delta / bank_broker_snapshot) if bank_broker_snapshot > 0 else None,
+            "items": bank_broker_items["items"],
+            "currency_breakdown": _cash_currency_breakdown(current_cash, snapshot_cash),
+            "snapshot_missing": baseline_missing(snapshot_cash_as_of, bank_broker_snapshot),
+        },
     }
 
 

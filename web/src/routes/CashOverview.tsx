@@ -1,5 +1,6 @@
 import { useCallback, useId, useMemo } from "react";
 import { api } from "../lib/api";
+import { bankBrokerCash } from "../lib/cashOverview";
 import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
@@ -46,13 +47,16 @@ export default function CashOverview() {
   const stablecoinTotal = cryptoStablecoins?.total_base ?? 0;
   const stablecoinLabel = (cryptoStablecoins?.symbols ?? STABLECOIN_LABEL_FALLBACK).join(" / ");
 
+  // #473 (V14): everything below the Stablecoins card is bank and broker cash only.
+  const cash = useMemo(() => (cashDeposits ? bankBrokerCash(cashDeposits) : null), [cashDeposits]);
+
   const accountItems = useMemo(
-    () => (cashDeposits?.items ?? []).map((item) => ({ label: item.source, value: item.value, percent: item.percent })),
-    [cashDeposits],
+    () => (cash?.items ?? []).map((item) => ({ label: item.source, value: item.value, percent: item.percent })),
+    [cash],
   );
 
   const currencySegments = useMemo(() => {
-    const breakdown = cashDeposits?.currency_breakdown ?? [];
+    const breakdown = cash?.currency_breakdown ?? [];
     const sum = breakdown.reduce((acc, c) => acc + Math.max(0, c.current_value), 0) || 1;
     return breakdown.map((c, idx) => ({
       key: c.currency,
@@ -61,11 +65,12 @@ export default function CashOverview() {
       color: chartColor(idx),
       valueLabel: `${money(c.current_value)} (${formatSignedMoney(c.delta_abs, shownCurrency)})`,
     }));
-  }, [cashDeposits, money, shownCurrency]);
+  }, [cash, money, shownCurrency]);
 
   const trendPoints = useMemo(
     () =>
       (cashDeposits?.trend ?? [])
+        .map((point) => ({ ...point, value: point.bank_broker_value ?? point.value }))
         .filter((point) => point.value != null)
         .map((point) => ({
           month: point.month,
@@ -78,27 +83,24 @@ export default function CashOverview() {
     [cashDeposits, compactMoney],
   );
 
-  // #232: the headline counts stablecoins as cash; net worth (Overview, History) counts them
-  // under Crypto (D-42). Say so, with the amount, so the two "cash" figures can be reconciled.
-  const stablecoinsInTotal = cashDeposits?.current_stablecoin_total ?? 0;
-  const stablecoinNote =
-    stablecoinsInTotal > 0
-      ? ` · Includes ${money(stablecoinsInTotal)} in stablecoins, which net worth counts under Crypto`
-      : "";
+  // #473 (V14, was #232): the headline is bank and broker cash, the cash net worth counts.
+  // The stablecoins (net worth counts them under Crypto, D-42) are a line of their own.
+  const stablecoinsAtPoint = cashDeposits?.current_stablecoin_total ?? 0;
 
-  // #397 (U13): the per-account table, the first check when net worth looks off.
-  const accountRows = cashDeposits?.accounts ?? [];
+  // #397 (U13): the per-account table, the first check when net worth looks off. Bank and
+  // broker accounts only (#473): the stablecoins are listed on their own card.
+  const accountRows = (cashDeposits?.accounts ?? []).filter((row) => row.kind !== "stablecoin");
   const compareLabel = cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month";
   // #397 (U14): foreign-currency cash revalued at today's rates (the bridge's cash FX part).
   const fxRevaluation = cashDeposits?.fx_revaluation ?? null;
 
   // #224: a compare month with no cash data says so; it isn't a zero baseline.
-  const missingReason = cashDeposits?.snapshot_missing ? noDataFor(cashDeposits.compare_month) : null;
+  const missingReason = cash?.snapshot_missing ? noDataFor(cashDeposits?.compare_month) : null;
 
   return (
     <PageShell
       title="Cash Overview"
-      subtitle="Bank cash, broker cash, and stablecoin balances as of any month."
+      subtitle="Bank and broker cash as of any month, with stablecoins on their own line."
       activeRoute="/cash"
       secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
@@ -111,16 +113,24 @@ export default function CashOverview() {
       {cashDeposits && (
         <RefreshingRegion className="wealthOverviewLayout" busy={deposits.isFetching || crypto.isFetching}>
           <HeroMetricCard
-            eyebrow={cashDeposits?.is_live ? "CURRENT CASH" : `CASH — ${snapshotMonthOf(cashDeposits?.net_worth_boundary_at, cashDeposits?.as_of_month ?? month)}`}
-            value={money(cashDeposits?.current_total)}
+            eyebrow={cashDeposits?.is_live ? "BANK & BROKER CASH" : `BANK & BROKER CASH — ${snapshotMonthOf(cashDeposits?.net_worth_boundary_at, cashDeposits?.as_of_month ?? month)}`}
+            value={money(cash?.total)}
             delta={{
-              abs: cashDeposits?.delta_abs,
-              compareValue: cashDeposits?.snapshot_total,
+              abs: cash?.delta_abs,
+              compareValue: cash?.snapshot_total,
               currency: shownCurrency,
               missingReason,
             }}
-            insightText={`As of ${formatDate(cashDeposits?.current_cash_as_of)} · vs ${cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month"} (${formatDate(cashDeposits?.snapshot_cash_as_of)})${stablecoinNote}`}
-          />
+            insightText={`As of ${formatDate(cashDeposits?.current_cash_as_of)} · vs ${cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month"} (${formatDate(cashDeposits?.snapshot_cash_as_of)})`}
+          >
+            {stablecoinsAtPoint > 0 ? (
+              <p className="cashStablecoinLine" data-testid="cash-stablecoin-line">
+                <span className="cashStablecoinLineLabel">Stablecoins ({stablecoinLabel})</span>
+                <strong>{money(stablecoinsAtPoint)}</strong>
+                <span className="muted">Not in this total: net worth counts them under Crypto</span>
+              </p>
+            ) : null}
+          </HeroMetricCard>
 
           <section>
             <div className="cashFlowSectionHeading">
@@ -141,7 +151,7 @@ export default function CashOverview() {
                   <span id={donutDescId} className="srOnly">{describeShares("Cash by account", accountItems)}</span>
                   <div className="cashFlowDonutCenter">
                     <span className="label">Total</span>
-                    <strong>{money(cashDeposits?.total)}</strong>
+                    <strong>{money(cash?.total)}</strong>
                   </div>
                 </div>
                 <div className="cashFlowLegendList">

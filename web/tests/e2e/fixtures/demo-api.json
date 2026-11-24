@@ -1758,32 +1758,38 @@
     {
      "month": "2026-06",
      "value": 2190361.00125,
-     "is_live": false
+     "is_live": false,
+     "bank_broker_value": 1731624.0375
     },
     {
      "month": "2026-07",
      "value": 2263554.76565,
-     "is_live": false
+     "is_live": false,
+     "bank_broker_value": 1789899.8495
     },
     {
      "month": "2026-08",
      "value": 2328752.75875,
-     "is_live": false
+     "is_live": false,
+     "bank_broker_value": 1843040.7625
     },
     {
      "month": "2026-09",
      "value": 2390655.92165,
-     "is_live": false
+     "is_live": false,
+     "bank_broker_value": 1894065.7295
     },
     {
      "month": "2026-10",
      "value": 2454531.12345,
-     "is_live": false
+     "is_live": false,
+     "bank_broker_value": 1946357.1435
     },
     {
      "month": "2026-11",
      "value": 2490053.5,
-     "is_live": true
+     "is_live": true,
+     "bank_broker_value": 1974805.0
     }
    ],
    "currency_breakdown": [
@@ -1914,6 +1920,51 @@
       "fx_effect": -1273.5065
      }
     ]
+   },
+   "bank_broker": {
+    "total": 1974805,
+    "snapshot_total": 1946357.1435,
+    "delta_abs": 28447.856499999994,
+    "delta_pct": 0.014615948874030473,
+    "items": [
+     {
+      "source": "IBKR",
+      "value": 924805,
+      "percent": 46.83
+     },
+     {
+      "source": "DBS",
+      "value": 400000,
+      "percent": 20.26
+     },
+     {
+      "source": "OCBC",
+      "value": 350000,
+      "percent": 17.72
+     },
+     {
+      "source": "UOB",
+      "value": 300000,
+      "percent": 15.19
+     }
+    ],
+    "currency_breakdown": [
+     {
+      "currency": "SGD",
+      "current_value": 1050000,
+      "snapshot_value": 1034250.0,
+      "delta_abs": 15750.0,
+      "delta_pct": 0.015228426395939087
+     },
+     {
+      "currency": "USD",
+      "current_value": 924805,
+      "snapshot_value": 912107.1435,
+      "delta_abs": 12697.856499999994,
+      "delta_pct": 0.013921452748714268
+     }
+    ],
+    "snapshot_missing": false
    }
   }
  },
@@ -7812,21 +7863,21 @@
     ],
     "outflow_recurring_split": [
      {
-      "label": "Recurring",
-      "amount": 64006.36,
-      "percent": 0.7785439997859217
+      "label": "One-off",
+      "amount": 49544.03999999999,
+      "percent": 0.6026309739712381
      },
      {
-      "label": "One-off",
-      "amount": 18206.54,
-      "percent": 0.22145600021407835
+      "label": "Recurring",
+      "amount": 32668.86,
+      "percent": 0.39736902602876195
      }
     ],
     "inflow_recurring_split": [
      {
       "label": "Recurring",
-      "amount": 125200,
-      "percent": 1
+      "amount": 125200.0,
+      "percent": 1.0
      }
     ],
     "outflow_fixed_variable_split": [
@@ -8101,7 +8152,7 @@
      },
      {
       "question": "Which recurring expenses are driving most of my outflows?",
-      "answer": "Household (19500), Travel (12305), Shopping (9775)"
+      "answer": "Household (19500), Education (7000), Insurance (2200)"
      },
      {
       "question": "What percentage of inflows came from salary, dividends, and transfers?",

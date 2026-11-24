@@ -180,6 +180,14 @@ def _check_month(pages: _Pages, month: str, *, live: bool) -> None:
     assert cash["current_total"] - cash["current_stablecoin_total"] == pytest.approx(headline["cash"], abs=TOL), where
     stablecoins_counted_as_crypto = cash["current_stablecoin_total"]
     assert 0 <= stablecoins_counted_as_crypto <= headline["crypto"] + TOL, where
+    # #473 (V14): the page's headline is bank and broker cash: net worth's cash, and where
+    # it sits and its currency mix add up to it.
+    bank_broker = cash["bank_broker"]
+    assert bank_broker["total"] == pytest.approx(headline["cash"], abs=TOL), where
+    assert sum(item["value"] for item in bank_broker["items"]) == pytest.approx(bank_broker["total"], abs=TOL), where
+    assert sum(c["current_value"] for c in bank_broker["currency_breakdown"]) == pytest.approx(
+        bank_broker["total"], abs=TOL
+    ), where
 
     # Risk (#241): its shares divide by the headline, at the positions' point in
     # time, and its geography splits the same gross assets.
@@ -318,6 +326,18 @@ def _check_trends(
                 # passed, so no bar either.
                 assert point["value"] is None, (label, point["month"])
 
+    # #473 (V14): the Cash trend's bank and broker bars are net worth's cash: History's
+    # point for a completed month, the headline for the month shown.
+    for point in cash["trend"]:
+        label = (f"{where} cash bank_broker trend", point["month"])
+        bar = {"value": point["bank_broker_value"]}
+        if point["month"] == shown_month:
+            _assert_bar(bar, headline["cash"], label)
+        elif not point["is_live"] and point["month"] in pages.points:
+            _assert_bar(bar, pages.history_point(point["month"])["cash"], label)
+        else:
+            assert (point["bank_broker_value"] is None) == (point["value"] is None), label
+
 
 def _check_previous_figures(
     pages: _Pages,
@@ -365,6 +385,10 @@ def _check_previous_figures(
 
     _assert_dated(cash, date_key="snapshot_cash_as_of", missing=cash["snapshot_missing"], where=f"{where} cash")
     assert cash["snapshot_total"] - cash["snapshot_stablecoin_total"] == pytest.approx(previous["cash"], abs=TOL), where
+    assert cash["bank_broker"]["snapshot_total"] == pytest.approx(previous["cash"], abs=TOL), where
+    assert cash["bank_broker"]["delta_abs"] == pytest.approx(
+        cash["bank_broker"]["total"] - cash["bank_broker"]["snapshot_total"], abs=TOL
+    ), where
     assert cash["delta_abs"] == pytest.approx(cash["current_total"] - cash["snapshot_total"], abs=TOL), where
 
 

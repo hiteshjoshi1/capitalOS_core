@@ -660,7 +660,7 @@ def _cash_trend(
     """The Cash page's cash (net-worth cash plus stablecoins) per month (#241,
     D-61): a month-end for each completed month, the open month live (month to
     date, the Cash headline), and no value for a month whose month-end hasn't
-    passed."""
+    passed. ``bank_broker_value``: the same without the stablecoins (#473, V14)."""
     months = _month_window(month_start, months=6)
     anchors = [clock._trend_point_anchor(candidate_month) for candidate_month in months]
     month_end_dates = [anchor.date() for anchor, is_live in anchors if anchor is not None and not is_live]
@@ -669,6 +669,7 @@ def _cash_trend(
     for candidate_month, (anchor, is_live) in zip(months, anchors):
         as_of = _effective_as_of(db, anchor, current_user_id) if anchor is not None else None
         value = None
+        bank_broker_value = None
         if anchor is not None and as_of is not None:
             stablecoin: list[dict[str, Any]] = []
             if is_live:
@@ -679,8 +680,15 @@ def _cash_trend(
                 if total_usd > 0:
                     usd_rate = D(fx.get_rates(anchor, base_currency, {"USD"}).get("USD"))
                     stablecoin = [{"currency": "USD", "value": total_usd * usd_rate}]
-            value = _sum_balances(_cash_balances(db, anchor, base_currency, current_user_id) + stablecoin)
-        points.append({"month": candidate_month.strftime("%Y-%m"), "value": value, "is_live": is_live})
+            cash = _cash_balances(db, anchor, base_currency, current_user_id)
+            value = _sum_balances(cash + stablecoin)
+            bank_broker_value = _sum_balances(cash)
+        points.append({
+            "month": candidate_month.strftime("%Y-%m"),
+            "value": value,
+            "bank_broker_value": bank_broker_value,
+            "is_live": is_live,
+        })
     return points
 
 
@@ -706,11 +714,14 @@ def _display_source(value: str | None) -> str:
     return text.lower().title()
 
 
-def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
+def _cash_deposits(
+    db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int, *, scope: str = CASH_SCOPE_CASH_PAGE
+) -> Dict[str, Any]:
     """The Cash page's "where cash sits": net-worth cash plus stablecoins
-    (_cash_positions, Cash-page scope) by platform, stablecoins by chain."""
+    (_cash_positions, Cash-page scope) by platform, stablecoins by chain. With the
+    net-worth scope, bank and broker cash only (#473, V14)."""
     buckets: Dict[str, Decimal] = {}
-    for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id, scope=CASH_SCOPE_CASH_PAGE):
+    for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id, scope=scope):
         source = _display_source(entry.get("platform"))
         buckets[source] = buckets.get(source, ZERO) + D(entry["value"])
 

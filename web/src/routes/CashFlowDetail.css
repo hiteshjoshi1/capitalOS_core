@@ -183,3 +183,9 @@
     max-width: none;
   }
 }
+
+/* #473 (V20): how "recurring" is decided, under its split bar. */
+.cashFlowSplitBarNote {
+  margin: 8px 0 0;
+  font-size: 12px;
+}

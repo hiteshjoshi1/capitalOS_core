@@ -492,6 +492,8 @@ describe("CashFlowDetail route", () => {
 
     expect(screen.getByRole("heading", { name: "How predictable is your spend" })).toBeInTheDocument();
     expect(screen.getByText("Recurring vs. non-recurring")).toBeInTheDocument();
+    // #473 (V20): the card says how recurring is decided.
+    expect(screen.getByText(/Recurring: about the same amount once a month for 3\+ months/)).toBeInTheDocument();
     expect(screen.getByText("Fixed vs. variable")).toBeInTheDocument();
 
     expect(screen.getByLabelText("Top merchants chart")).toBeInTheDocument();

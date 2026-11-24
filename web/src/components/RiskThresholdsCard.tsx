@@ -12,7 +12,7 @@ const FIELDS: Array<{ key: FieldKey; defaultKey: keyof RiskThresholds; label: st
     key: "largest_position_warn_pct",
     defaultKey: "largestPositionWarnPct",
     label: "Largest position",
-    hint: "One holding's share of net worth.",
+    hint: "One holding's share of net worth. The Inbox alerts you above it too.",
   },
   {
     key: "top_n_warn_pct",
@@ -42,6 +42,7 @@ function toDraft(setting: RiskThresholdsSetting | undefined): Draft {
 /**
  * Settings → Risk thresholds (#253): the percent above which the Risk page calls a figure
  * concentrated. Only an upper threshold warns. A blank field keeps the default (lib/risk.ts).
+ * The largest-position one is also the Inbox's concentration alert's (#473, V16).
  */
 export default function RiskThresholdsCard() {
   const idPrefix = useId();

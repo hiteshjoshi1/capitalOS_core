@@ -11,3 +11,17 @@
   align-items: flex-end;
   gap: 2px;
 }
+
+/* #473 (V14): the stablecoins under the bank & broker cash headline, a line of their own. */
+.cashStablecoinLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.cashStablecoinLineLabel {
+  font-weight: 600;
+}

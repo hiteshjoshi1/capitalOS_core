@@ -452,7 +452,7 @@ class CashDepositsOut(BaseModel):
     snapshot_stablecoin_total: Optional[float] = None
     delta_abs: Optional[float] = None
     delta_pct: Optional[float] = None
-    trend: list["MiniTrendPoint"] = []
+    trend: list["CashTrendPoint"] = []
     currency_breakdown: list["CashCurrencyBreakdownItem"] = []
     # No cash data at all for the compare month (not a real zero), #224.
     snapshot_missing: bool = False
@@ -460,6 +460,9 @@ class CashDepositsOut(BaseModel):
     accounts: list["CashAccountRow"] = []
     # #397 (U14): foreign-currency cash revalued from the compare point to now.
     fx_revaluation: Optional["CashFxRevaluation"] = None
+    # #473 (V14): the same page without the stablecoins (net worth's cash): the headline,
+    # where it sits and the currency mix. The fields above keep stablecoins in.
+    bank_broker: Optional["CashBankBrokerView"] = None
 
 
 class StockExposureItem(BaseModel):
@@ -564,6 +567,23 @@ class CashCurrencyBreakdownItem(BaseModel):
     snapshot_value: float
     delta_abs: float
     delta_pct: Optional[float] = None
+
+
+class CashTrendPoint(MiniTrendPoint):
+    # #473 (V14): the month's cash without the stablecoins (bank and broker cash).
+    bank_broker_value: Optional[float] = None
+
+
+class CashBankBrokerView(BaseModel):
+    """The Cash page without the stablecoins (#473, V14): bank and broker cash, the
+    cash net worth counts (stablecoins are Crypto there, D-42)."""
+    total: float
+    snapshot_total: float
+    delta_abs: float
+    delta_pct: Optional[float] = None
+    items: list[CashDepositsItem] = []
+    currency_breakdown: list[CashCurrencyBreakdownItem] = []
+    snapshot_missing: bool = False
 
 
 class DataHubActivityItem(BaseModel):

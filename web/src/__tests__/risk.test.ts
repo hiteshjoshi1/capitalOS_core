@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -188,5 +190,15 @@ describe("risk helpers", () => {
       { key: "liabilities", label: "Cards owed", value: 20 },
     ]);
     expect(buildCurrencyExposureRows(null)).toEqual([]);
+  });
+});
+
+describe("one concentration threshold (#473, V16)", () => {
+  it("the server's default for the Inbox alert is the Risk page's", () => {
+    // api/app/services/risk_thresholds.py keeps the one default the server uses itself.
+    const source = readFileSync(resolve(__dirname, "../../../api/app/services/risk_thresholds.py"), "utf8");
+    const match = source.match(/^DEFAULT_LARGEST_POSITION_WARN_PCT = ([0-9.]+)$/m);
+    expect(match).not.toBeNull();
+    expect(Number(match?.[1])).toBe(DEFAULT_RISK_THRESHOLDS.largestPositionWarnPct);
   });
 });
