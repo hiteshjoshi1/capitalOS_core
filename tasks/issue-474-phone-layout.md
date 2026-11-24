@@ -37,7 +37,7 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/474
 ## How To Test
 - `cd web && npx vitest run src/__tests__/StockHoldings.test.tsx src/__tests__/CryptoHoldings.test.tsx src/__tests__/CashFlowDetail.test.tsx`
 - `make verify`
-- `make e2e-smoke` (baselines updated with `make e2e-smoke-update`: phone/desktop holdings, phone cash-flow).
+- `make e2e-smoke` (baselines updated: phone/desktop holdings and crypto, phone cash-flow).
 - In the app at 375px: Stocks → tap "Positions", search "app", tap a row; Crypto → an unknown token has ⋯ → Hide;
   Cash Flow → Overview shows four headings, the first two open.
 
@@ -51,15 +51,14 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/474
 
 ## Execution Journal (Codex Mutable)
 - Current Stage: `pr`
-- Workflow Status: `running`
+- Workflow Status: `shipped`
 - Provider/Model: `anthropic/claude-opus-5-5`
 - Last Updated: `2026-11-24`
 
 ## Deterministic Gate Results (Codex Mutable)
-- `lint`: see PR CI
-- `typecheck`: see PR CI
-- `tests`: vitest (Stocks, Crypto, Cash Flow) pass; `make verify`
-- `e2e`: `make e2e-smoke-update`, changed PNGs reviewed
+- `make verify`: pass (lint, typecheck, backend 1349 passed, frontend 743 passed)
+- `e2e`: `make e2e-smoke-update` (screens). Phone Stocks 13,503 → 5,254 px; phone Cash Flow 3,599 → 1,958 px;
+  phone/desktop Crypto: no Hide buttons on the demo's priced tokens. Desktop Stocks: only the search box.
 
 ## Extra Files Changed (Codex Mutable)
 - `web/src/components/CashFlowYearOverYear.tsx` — reason: the savings-rate block lives there; it takes `fold`.

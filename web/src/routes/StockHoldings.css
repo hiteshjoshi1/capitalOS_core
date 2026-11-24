@@ -520,6 +520,11 @@
 }
 
 @media (max-width: 900px) {
+  /* #474: the one-line rows need the width more than the card needs its padding. */
+  .stockHoldingsPrimaryCard {
+    padding: 8px 16px;
+  }
+
   .stockSearchInput {
     flex: 1 1 100%;
     width: 100%;

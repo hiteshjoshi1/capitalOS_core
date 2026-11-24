@@ -25,10 +25,11 @@
   margin-bottom: 0;
 }
 
+/* Level with the title (under the eyebrow), not the middle of a heading with a description. */
 .foldSectionChevron {
   position: absolute;
   right: 8px;
-  top: 50%;
+  top: 34px;
   width: 10px;
   height: 10px;
   border-right: 2px solid var(--muted);
