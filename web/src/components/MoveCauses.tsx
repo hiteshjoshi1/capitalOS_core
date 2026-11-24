@@ -7,7 +7,7 @@ import "./MoveCauses.css";
 /**
  * "Why it moved" (#289): the data causes behind a period's change, from the month
  * bridge's `move_causes` (one backend list for Overview and History). Significant causes
- * first; the rest under "Also"; "No data cause found" for a big move without one.
+ * first; the rest under "Also"; "Mostly market moves" for a big move without one (#475).
  */
 export function MoveCausesList({
   data,
@@ -18,7 +18,7 @@ export function MoveCausesList({
   data: MoveCausesData;
   currency: string;
   compact?: boolean;
-  /** History already flagged the month as unusual: say "no data cause" even below 5%. */
+  /** History already flagged the month as unusual: say "mostly market moves" even below 5%. */
   flagged?: boolean;
 }) {
   const main = data.causes.filter((c) => c.significant);

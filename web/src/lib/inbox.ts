@@ -1,7 +1,7 @@
 import type { InboxItem } from "./api";
 import { sourceLink } from "./sourceFreshness";
 
-/** One shared reading of the Data Hub inbox (#316) for the Inbox, the bell and Alerts (#317). */
+/** One shared reading of the Data Hub inbox (#316) for the Inbox and the bell (#317; the Alerts page went in #475). */
 
 export const INBOX_SEVERITY_LABEL: Record<InboxItem["severity"], string> = {
   high: "Urgent",

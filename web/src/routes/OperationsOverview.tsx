@@ -16,7 +16,7 @@ import { INBOX_SEVERITY_LABEL, inboxItemRoute } from "../lib/inbox";
 /**
  * The Data Hub Overview is the Inbox (#316, #309's review): what needs you first, each
  * with its button; what's fine in one collapsed line; the latest activity in one line.
- * "Refresh all" sits in the page header. The bell (#317) and Alerts read the same list.
+ * "Refresh all" sits in the page header. The bell (#317) reads the same list.
  */
 
 type RunKind = NonNullable<InboxAction["run"]>;

@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import type { BridgeLine, BridgeMover, BridgeTrade, MonthBridge } from "../lib/api";
 import * as fmt from "../lib/format";
 import { noDataFor } from "../lib/delta";
-import { BRIDGE_LINKS } from "../lib/monthBridge";
+import { BRIDGE_LINKS, isShownBridgeLine } from "../lib/monthBridge";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import Delta from "./Delta";
 import FxNote from "./FxNote";
@@ -205,7 +205,7 @@ export default function MonthBridgeCard({ month, baseCurrency }: { month: string
                 <span className="monthBridgeAmount">{fmt.formatMoney(bridge.start.value, currency)}</span>
               </div>
             </li>
-            {bridge.lines.map((line) => (
+            {bridge.lines.filter(isShownBridgeLine).map((line) => (
               <BridgeRow key={line.key} line={line} currency={currency} />
             ))}
             <BridgeRow line={bridge.unexplained} currency={currency} muted />

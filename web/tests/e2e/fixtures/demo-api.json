@@ -2150,8 +2150,8 @@
      "key": "new_money",
      "label": "New money in",
      "amount": 0,
-     "status": "partial",
-     "reason": "No cash record for DBS, DBS Vickers: money paid in or taken out there is in Unexplained",
+     "status": "ok",
+     "reason": null,
      "parts": [
       {
        "key": "deposits",
@@ -2530,7 +2530,7 @@
     "change_pct": 10.31479395180202,
     "is_big_move": true,
     "causes": [],
-    "none_reason": "No data cause found: a market move"
+    "none_reason": "Mostly market moves; no new statement or account explains it."
    }
   }
  },

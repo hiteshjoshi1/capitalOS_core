@@ -163,7 +163,8 @@ describe("Dividends", () => {
     expect(screen.getByRole("heading", { name: "What's received vs. what's ahead" })).toBeInTheDocument();
     expect(screen.getByText("Expected, next 12 months")).toBeInTheDocument();
     expect(screen.getByText("Portfolio coverage")).toBeInTheDocument();
-    expect(screen.getByText("12-month dividend income")).toBeInTheDocument();
+    // #475 (V15): one monthly chart (dividends & interest, in the headline), not a second dividends-only one.
+    expect(screen.queryByText("12-month dividend income")).not.toBeInTheDocument();
     expect(screen.getByText("Who paid you this month")).toBeInTheDocument();
     expect((await screen.findAllByText("Apple Inc.")).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByLabelText("Assumed tax rate percent")).not.toBeInTheDocument();
@@ -256,8 +257,7 @@ describe("Dividends", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("No dividends in selected range.")).toBeInTheDocument();
-    expect(screen.getByText("No company-level dividend records yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No company-level dividend records yet.")).toBeInTheDocument();
 
     const user = (await import("@testing-library/user-event")).default.setup();
     await user.click(screen.getByRole("button", { name: "Expected" }));
@@ -318,7 +318,7 @@ describe("Income headline (#267)", () => {
   it("leads with the last 12 months and the year to date, each against a year earlier", async () => {
     mockApi.incomeSummary.mockResolvedValue(incomeFixture());
     renderPage();
-    const eyebrow = await screen.findByText("INCOME · LAST 12 MONTHS");
+    const eyebrow = await screen.findByText("DIVIDENDS & INTEREST · LAST 12 MONTHS");
     const hero = eyebrow.closest("article") as HTMLElement;
     expect(hero).toHaveTextContent("S$ 1,200");
     expect(hero).toHaveTextContent("vs the 12 months before");
@@ -328,6 +328,10 @@ describe("Income headline (#267)", () => {
     expect(hero).toHaveTextContent("SAME DATES LAST YEAR");
     expect(hero).toHaveTextContent("S$ 120");
     expect(hero).toHaveTextContent("+50%");
+    // #475 (V1): "Dividends & interest", not "Income" (Cash Flow → Income is salary); one monthly chart.
+    expect(screen.queryByText(/^INCOME/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: /by month|dividend income/i })).toHaveLength(1);
+    expect(screen.getByRole("img", { name: "Dividends and interest by month" })).toBeInTheDocument();
     // The month-on-month dividends card comes after the income headline.
     const dividends = screen.getByText("DIVIDENDS THIS MONTH");
     expect(eyebrow.compareDocumentPosition(dividends) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -344,7 +348,7 @@ describe("Income headline (#267)", () => {
       ytd_change_pct: null,
     });
     renderPage();
-    const hero = (await screen.findByText("INCOME · LAST 12 MONTHS")).closest("article") as HTMLElement;
+    const hero = (await screen.findByText("DIVIDENDS & INTEREST · LAST 12 MONTHS")).closest("article") as HTMLElement;
     expect(hero).toHaveTextContent("no comparison");
   });
 });
@@ -390,9 +394,9 @@ describe("Dividends races", () => {
     const jan = summaries.find((a) => a[1] === "2026-01");
 
     await act(async () => jan.resolve(summaryFor("2026-01", 111)));
-    expect((await screen.findAllByText("S$ 111")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("S$ 111.00")).length).toBeGreaterThan(0);
     await act(async () => feb.resolve(summaryFor("2026-02", 999)));
-    expect(screen.queryByText("S$ 999")).not.toBeInTheDocument();
+    expect(screen.queryByText("S$ 999.00")).not.toBeInTheDocument();
     await waitFor(() => expect(feb.signal?.aborted).toBe(true));
   });
 });

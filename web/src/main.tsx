@@ -21,7 +21,6 @@ import {
   MarketData,
   CashFlowDetail,
   CashFlowMapping,
-  Alerts,
   WealthHistory,
   WealthRisk,
   Dividends,
@@ -68,7 +67,9 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/liabilities/credit-cards" element={<RedirectKeepingSearch to="/cards" />} />
                 <Route path="/credit-cards" element={<RedirectKeepingSearch to="/cards" />} />
                 <Route path="/loans" element={<RedirectKeepingSearch to="/cards" />} />
-                <Route path="/alerts" element={<Alerts />} />
+                {/* #475 (V3): the Alerts page was a third copy of the Inbox (and the bell): /alerts
+                    opens the Data Hub Inbox, query string kept. */}
+                <Route path="/alerts" element={<RedirectKeepingSearch to="/operations" />} />
                 <Route path="/operations" element={<OperationsOverview />} />
                 <Route path="/operations/sources" element={<AccountsSources />} />
                 <Route path="/ingest" element={<Ingest />} />

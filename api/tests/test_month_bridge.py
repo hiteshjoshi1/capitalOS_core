@@ -311,3 +311,15 @@ def test_split_is_exact():
     split = _split(odd, same)
     assert (split.price, split.fx, split.quantity) == pytest.approx((100.0, 0.0, 0.0))
     assert float(split.gap) == pytest.approx(30.0)
+
+
+
+def test_new_money_is_partial_only_with_an_estimate(mid: TestClient):
+    """#475 (V9): Sharekhan has no cash record, but in February nothing was bought or sold
+    there, so nothing on New money is estimated: not "partial" (it was, every month, at S$ 0).
+    March's RELIANCE purchase there is estimated, so March stays partial
+    (test_live_month_lines_by_hand)."""
+    feb = _line(_bridge(mid, "2026-02"), "new_money")
+    assert feb["status"] == "ok" and feb["reason"] is None
+    assert float(feb["amount"]) == pytest.approx(0.0, abs=TOL)
+    assert not any(part["key"].startswith("broker:") for part in feb["parts"])

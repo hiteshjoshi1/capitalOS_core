@@ -6,6 +6,7 @@ import RefreshingRegion from "../components/RefreshingRegion";
 import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent } from "../lib/format";
 import { noDataFor, noRateFor } from "../lib/delta";
 import { chartColor } from "../lib/chartColors";
+import { dustLabel, dustRule, isDust } from "../lib/cryptoDust";
 import "../App.css";
 import "./CryptoHoldings.css";
 import MonthBar from "../components/MonthBar";
@@ -45,6 +46,9 @@ export default function CryptoHoldings() {
     valueBase != null && changeBase != null ? valueBase - changeBase : null;
 
   const allHoldings = useMemo(() => summary?.top_holdings ?? [], [summary?.top_holdings]);
+  // #475 (V12): the dust threshold in the page's currency ("under S$ 10"), not USD.
+  const dust = useMemo(() => dustRule(summary), [summary]);
+  const dustText = dustLabel(dust);
   const listedHoldings = useMemo(() => allHoldings.filter((h) => !h.hidden), [allHoldings]);
   const hiddenTokenCount = summary?.hidden_token_count ?? allHoldings.length - listedHoldings.length;
   // Hidden tokens show only with "Show hidden" (whatever their value); the rest follow the dust rule.
@@ -53,12 +57,12 @@ export default function CryptoHoldings() {
     [kind],
   );
   const visibleHoldings = useMemo(
-    () => allHoldings.filter((h) => kindMatches(h) && (h.hidden ? showHidden : showDust || h.value_usd >= 10)),
-    [allHoldings, showDust, showHidden, kindMatches],
+    () => allHoldings.filter((h) => kindMatches(h) && (h.hidden ? showHidden : showDust || !isDust(h, dust))),
+    [allHoldings, showDust, showHidden, kindMatches, dust],
   );
   const stablecoinCount = useMemo(() => listedHoldings.filter((h) => h.is_stablecoin).length, [listedHoldings]);
   const compareLabel = summary?.compare_month ? formatMonth(summary.compare_month, "medium") : "last month";
-  const hiddenDustCount = listedHoldings.length - listedHoldings.filter((h) => h.value_usd >= 10).length;
+  const hiddenDustCount = listedHoldings.length - listedHoldings.filter((h) => !isDust(h, dust)).length;
 
   type Holding = CryptoSummary["top_holdings"][number];
   /** "Not spam" / "Show" for a hidden token, "Hide" for a listed one (#342). Null resets to automatic. */
@@ -233,7 +237,7 @@ export default function CryptoHoldings() {
                     onChange={(e) => setShowDust(e.target.checked)}
                     style={{ marginRight: 6 }}
                   />
-                  Show holdings under USD 10
+                  Show holdings under {dustText}
                 </label>
                 {hiddenTokenCount > 0 && (
                   <button
@@ -249,8 +253,8 @@ export default function CryptoHoldings() {
             </div>
             <div className="muted stockHoldingsMeta" style={{ marginBottom: 8 }}>
               {showDust
-                ? `Showing all ${listedHoldings.length} holdings, including dust under USD 10`
-                : `Showing ${visibleHoldings.filter((h) => !h.hidden).length} of ${listedHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under USD 10` : ""}`}
+                ? `Showing all ${listedHoldings.length} holdings, including dust under ${dustText}`
+                : `Showing ${visibleHoldings.filter((h) => !h.hidden).length} of ${listedHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under ${dustText}` : ""}`}
               {hiddenTokenCount > 0 &&
                 ` · ${hiddenTokenCount} unknown or hidden token${hiddenTokenCount === 1 ? "" : "s"} (no price source, likely airdropped spam)${showHidden ? ", shown below" : ""}`}
             </div>

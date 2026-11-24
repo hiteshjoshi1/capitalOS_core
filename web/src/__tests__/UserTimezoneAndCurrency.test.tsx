@@ -175,6 +175,41 @@ describe("home timezone (#202)", () => {
     expect(mockApi.patchPreferences).toHaveBeenCalledWith({ base_currency: "HKD" });
   });
 
+  it("offers the current and common zones first, and a search narrows the rest (#475, V24)", async () => {
+    mockBrowserTimezone("Europe/London");
+    mockApi.getPreferences.mockResolvedValueOnce({
+      theme: "dark",
+      accent_color: "#0f7a5c",
+      timezone: "America/New_York",
+      timezone_source: "user",
+      base_currency: "SGD",
+    });
+    render(<HomeRegionCard />);
+    const select = (await screen.findByLabelText(/Home timezone/)) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("America/New_York"));
+    const groups = [...select.querySelectorAll("optgroup")];
+    expect(groups.map((g) => g.label)).toEqual(["Current and common", "All timezones"]);
+    expect([...groups[0].querySelectorAll("option")].map((o) => o.value)).toEqual([
+      "America/New_York",
+      "Europe/London",
+      "Asia/Singapore",
+      "Asia/Kolkata",
+    ]);
+    expect(groups[1].querySelectorAll("option").length).toBeGreaterThan(100);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search timezones" }), { target: { value: "port of" } });
+    const values = [...select.options].map((o) => o.value);
+    expect(values).toContain("America/Port_of_Spain");
+    expect(values).toContain("America/New_York"); // the current zone stays, so the select keeps its value
+    expect(values).not.toContain("Asia/Singapore");
+    expect(select.value).toBe("America/New_York");
+    fireEvent.change(select, { target: { value: "America/Port_of_Spain" } });
+    await waitFor(() => expect(mockApi.patchPreferences).toHaveBeenCalledWith({ timezone: "America/Port_of_Spain" }));
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search timezones" }), { target: { value: "zzzz" } });
+    expect(await screen.findByText(/No timezone matches/)).toBeInTheDocument();
+  });
+
   it("Settings reports a timezone the server refuses", async () => {
     mockApi.getPreferences.mockResolvedValueOnce({
       theme: "dark",

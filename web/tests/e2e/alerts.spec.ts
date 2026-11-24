@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedSession } from "./helpers/auth";
 
-// #317: Alerts and the header bell read the Data Hub inbox (#316).
+// #317: the header bell reads the Data Hub inbox (#316). #475 (V3): the Alerts page was a third
+// copy of that list; /alerts now opens the Data Hub Inbox.
 async function mockInbox(page: Page, items: object[] = []) {
   await page.route("**/operations/inbox", async (route) => {
     await route.fulfill({
@@ -35,28 +36,14 @@ test.beforeEach(async ({ page }) => {
   await mockAuthenticatedSession(page);
 });
 
-test("navigates to /alerts and shows the inbox items", async ({ page }) => {
+test("/alerts opens the Data Hub Inbox, keeping the query string", async ({ page }) => {
   await mockInbox(page, ITEMS);
-  await page.goto("/alerts");
-  await expect(page.getByRole("heading", { level: 1, name: "Alerts" })).toBeVisible();
-  const list = page.getByRole("list", { name: "Alerts" });
+  await page.goto("/alerts?month=2026-11");
+  await expect(page).toHaveURL(/\/operations\?month=2026-11$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Alerts" })).toHaveCount(0);
+  const list = page.locator("ul.inboxList");
   await expect(list.getByText("DBS Multiplier: 20 days overdue")).toBeVisible();
   await expect(list.getByText("IBKR: file format not recognised")).toBeVisible();
   // The bell shows the same count.
   await expect(page.getByLabel("2 items need you")).toBeVisible();
-});
-
-test("shows the empty state when nothing needs you", async ({ page }) => {
-  await mockInbox(page, []);
-  await page.goto("/alerts");
-  await expect(page.getByText("Nothing needs you. Everything is up to date.")).toBeVisible();
-  await expect(page.getByLabel("Nothing needs you")).toBeVisible();
-});
-
-test("alert items link to their fix", async ({ page }) => {
-  await mockInbox(page, ITEMS);
-  await page.goto("/alerts");
-  const list = page.getByRole("list", { name: "Alerts" });
-  await expect(list.getByRole("link", { name: "Upload" })).toHaveAttribute("href", "/ingest?account_id=1");
-  await expect(list.getByRole("link", { name: "Fix format" })).toHaveAttribute("href", "/ingest?job=4");
 });
