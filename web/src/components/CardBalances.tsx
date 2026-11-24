@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import { api, type CreditCardBalanceItem } from "../lib/api";
 import { differenceReason, money, owedLabel } from "../lib/cardBalances";
@@ -11,20 +11,36 @@ import "./CardBalances.css";
  * What each card owes, what was paid, and whether each statement adds up (#300, D-76).
  * The owed amount is the card's newest dated balance (a statement) carried by its
  * transactions since; each statement is checked against the transactions before it.
+ * Statement balances are typed in on one "Update balances" sheet for all cards (#472).
  */
 export default function CardBalances({ baseCurrency }: { baseCurrency: string }) {
   const balances = useApiResource(resourceKey("creditCardBalances", baseCurrency), () =>
     api.creditCardBalances(baseCurrency),
   );
   const data = balances.data;
+  const [updating, setUpdating] = useState(false);
+  const sheetId = useId();
 
   return (
     <section aria-labelledby="card-balances-title">
-      <div className="cashFlowSectionHeading">
-        <p className="wealthEyebrow">Owed and paid</p>
-        <h2 className="cashFlowSectionTitle" id="card-balances-title">
-          Card balances
-        </h2>
+      <div className="cashFlowSectionHeading cardBalancesHeading">
+        <div>
+          <p className="wealthEyebrow">Owed and paid</p>
+          <h2 className="cashFlowSectionTitle" id="card-balances-title">
+            Card balances
+          </h2>
+        </div>
+        {data && data.cards.length > 0 ? (
+          <button
+            type="button"
+            className={`btn${updating ? "" : " btnPrimary"}`}
+            aria-expanded={updating}
+            aria-controls={updating ? sheetId : undefined}
+            onClick={() => setUpdating((open) => !open)}
+          >
+            Update balances
+          </button>
+        ) : null}
       </div>
       {balances.error && !data ? (
         <LoadError title="Couldn't load card balances" error={balances.error} onRetry={() => void balances.reload()} />
@@ -36,6 +52,15 @@ export default function CardBalances({ baseCurrency }: { baseCurrency: string })
       ) : null}
       {data ? (
         <div className="cardBalancesList">
+          {updating ? (
+            <UpdateBalancesSheet
+              id={sheetId}
+              cards={data.cards}
+              baseCurrency={baseCurrency}
+              onSaved={() => void balances.reload()}
+              onClose={() => setUpdating(false)}
+            />
+          ) : null}
           {data.flagged_count > 0 ? (
             <p className="cardBalancesAlert" role="status">
               {data.flagged_count === 1
@@ -97,13 +122,9 @@ function CardBalanceRow({
           <DueLine card={card} onSaved={onSaved} baseCurrency={baseCurrency} />
         </ul>
       ) : (
-        <div className="cardBalanceFacts">
-          <p className="muted">
-            No statement balance on file, so this is this month's charges only (an estimate). Enter the balance from
-            your last statement to carry it properly.
-          </p>
-          <StatementBalanceForm accountId={card.account_id} currency={card.currency} onSaved={onSaved} baseCurrency={baseCurrency} />
-        </div>
+        <p className="muted cardBalanceFacts">
+          No statement balance on file: this month&apos;s charges only, an estimate. Add one under Update balances.
+        </p>
       )}
 
       <p className="cardBalanceFees">
@@ -294,80 +315,169 @@ function DueForm({
   );
 }
 
-function StatementBalanceForm({
-  accountId,
-  currency,
-  onSaved,
+type BalanceDraft = { asOf: string; owed: string; dueDate: string; minimum: string };
+
+const EMPTY_DRAFT: BalanceDraft = { asOf: "", owed: "", dueDate: "", minimum: "" };
+
+type BalanceEntry = {
+  card: CreditCardBalanceItem;
+  payload: { as_of_date: string; owed: number; due_date: string | null; minimum_due: number | null };
+};
+
+/** A card's typed-in statement, or an error saying what's missing. Null when left empty (skipped). */
+function parseDraft(card: CreditCardBalanceItem, draft: BalanceDraft): BalanceEntry | string | null {
+  if (!draft.asOf && !draft.owed.trim() && !draft.dueDate && !draft.minimum.trim()) return null;
+  const owed = Number(draft.owed.replace(/,/g, ""));
+  if (!draft.asOf || draft.owed.trim() === "" || !Number.isFinite(owed)) {
+    return "Enter the statement date and the amount it says you owe.";
+  }
+  const min = draft.dueDate && draft.minimum.trim() !== "" ? Number(draft.minimum.replace(/,/g, "")) : null;
+  if (min != null && !Number.isFinite(min)) {
+    return "The minimum payment should be a number, or leave it empty.";
+  }
+  return {
+    card,
+    payload: { as_of_date: draft.asOf, owed, due_date: draft.dueDate || null, minimum_due: min },
+  };
+}
+
+/**
+ * One "Update balances" sheet for every card (#472, V19 of #432), in place of a form under each
+ * card: type in each card's newest statement (date, amount owed, optional due date). A card left
+ * empty is skipped. Each filled card is saved with the same call as before (#300).
+ */
+function UpdateBalancesSheet({
+  id,
+  cards,
   baseCurrency,
+  onSaved,
+  onClose,
 }: {
-  accountId: number;
-  currency: string;
-  onSaved: () => void;
+  id: string;
+  cards: CreditCardBalanceItem[];
   baseCurrency: string;
+  onSaved: () => void;
+  onClose: () => void;
 }) {
-  const [asOf, setAsOf] = useState("");
-  const [owed, setOwed] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [minimum, setMinimum] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<number, BalanceDraft>>({});
+  const [errors, setErrors] = useState<Record<number, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const draftFor = (accountId: number) => drafts[accountId] ?? EMPTY_DRAFT;
+  const setField = (accountId: number, field: keyof BalanceDraft, value: string) =>
+    setDrafts((prev) => ({ ...prev, [accountId]: { ...(prev[accountId] ?? EMPTY_DRAFT), [field]: value } }));
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const amount = Number(owed.replace(/,/g, ""));
-    const min = minimum.trim() === "" ? null : Number(minimum.replace(/,/g, ""));
-    if (!asOf || !Number.isFinite(amount)) {
-      setError("Enter the statement date and the amount it says you owe.");
+    const entries: BalanceEntry[] = [];
+    const found: Record<number, string> = {};
+    for (const card of cards) {
+      const parsed = parseDraft(card, draftFor(card.account_id));
+      if (typeof parsed === "string") found[card.account_id] = parsed;
+      else if (parsed) entries.push(parsed);
+    }
+    setErrors(found);
+    if (Object.keys(found).length > 0) {
+      setFormError(null);
       return;
     }
-    if (min != null && !Number.isFinite(min)) {
-      setError("The minimum payment should be a number, or leave it empty.");
+    if (entries.length === 0) {
+      setFormError("Fill in at least one card's statement date and amount owed.");
       return;
     }
+    setFormError(null);
     setSaving(true);
-    setError(null);
-    try {
-      await api.setCreditCardBalance(
-        accountId,
-        { as_of_date: asOf, owed: amount, due_date: dueDate || null, minimum_due: dueDate ? min : null },
-        baseCurrency,
-      );
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save the balance.");
-    } finally {
-      setSaving(false);
+    const failed: Record<number, string> = {};
+    const saved: number[] = [];
+    // One card at a time: each save recomputes the balances (and History) from its date.
+    for (const entry of entries) {
+      try {
+        await api.setCreditCardBalance(entry.card.account_id, entry.payload, baseCurrency);
+        saved.push(entry.card.account_id);
+      } catch (err) {
+        failed[entry.card.account_id] = err instanceof Error ? err.message : "Couldn't save the balance.";
+      }
     }
+    setSaving(false);
+    setErrors(failed);
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const accountId of saved) delete next[accountId];
+      return next;
+    });
+    if (saved.length > 0) onSaved();
+    if (Object.keys(failed).length === 0) onClose();
   };
 
   return (
-    <form className="cardBalanceForm" onSubmit={(event) => void onSubmit(event)}>
-      <label>
-        <span>Statement date</span>
-        <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} required />
-      </label>
-      <label>
-        <span>Amount owed ({currency})</span>
-        <input inputMode="decimal" value={owed} onChange={(e) => setOwed(e.target.value)} placeholder="0.00" required />
-      </label>
-      <label>
-        <span>Payment due date (optional)</span>
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-      </label>
-      {dueDate ? (
-        <label>
-          <span>Minimum payment ({currency}, optional)</span>
-          <input inputMode="decimal" value={minimum} onChange={(e) => setMinimum(e.target.value)} placeholder="0.00" />
-        </label>
-      ) : null}
-      <button type="submit" className="btn" disabled={saving}>
-        {saving ? "Saving…" : "Save balance"}
-      </button>
-      {error ? (
+    <form id={id} className="card cardBalanceSheet" aria-label="Update balances" onSubmit={(event) => void onSubmit(event)}>
+      <p className="muted cardBalanceSheetIntro">
+        From each card&apos;s newest statement: its date and the amount it says you owe. Leave a card empty to keep it as
+        it is.
+      </p>
+      {cards.map((card) => {
+        const draft = draftFor(card.account_id);
+        const error = errors[card.account_id];
+        return (
+          <fieldset className="cardBalanceSheetCard" key={card.account_id}>
+            <legend>{card.card_name}</legend>
+            <p className="muted cardBalanceSheetHint">
+              {card.method === "running" && card.last_balance_date
+                ? `Statement of ${fmt.formatDate(card.last_balance_date)}: ${money(card.last_balance, card.currency)}`
+                : "No statement balance on file"}
+            </p>
+            <div className="cardBalanceSheetFields">
+              <label>
+                <span>Statement date</span>
+                <input type="date" value={draft.asOf} onChange={(e) => setField(card.account_id, "asOf", e.target.value)} />
+              </label>
+              <label>
+                <span>Amount owed ({card.currency})</span>
+                <input
+                  inputMode="decimal"
+                  value={draft.owed}
+                  onChange={(e) => setField(card.account_id, "owed", e.target.value)}
+                  placeholder="0.00"
+                />
+              </label>
+              <label>
+                <span>Payment due date (optional)</span>
+                <input type="date" value={draft.dueDate} onChange={(e) => setField(card.account_id, "dueDate", e.target.value)} />
+              </label>
+              {draft.dueDate ? (
+                <label>
+                  <span>Minimum payment ({card.currency}, optional)</span>
+                  <input
+                    inputMode="decimal"
+                    value={draft.minimum}
+                    onChange={(e) => setField(card.account_id, "minimum", e.target.value)}
+                    placeholder="0.00"
+                  />
+                </label>
+              ) : null}
+            </div>
+            {error ? (
+              <p className="cardBalanceWarn" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </fieldset>
+        );
+      })}
+      {formError ? (
         <p className="cardBalanceWarn" role="alert">
-          {error}
+          {formError}
         </p>
       ) : null}
+      <div className="cardBalanceFormActions">
+        <button type="submit" className="btn btnPrimary" disabled={saving}>
+          {saving ? "Saving…" : "Save balances"}
+        </button>
+        <button type="button" className="btn" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }

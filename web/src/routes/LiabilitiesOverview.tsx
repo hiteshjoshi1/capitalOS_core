@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { CreditCardTransaction } from "../lib/api";
-import { useSelectedMonth } from "../lib/selectedMonth";
+import { currentMonthYYYYMM, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import CardBalances from "../components/CardBalances";
 import RefreshingRegion from "../components/RefreshingRegion";
@@ -123,9 +123,11 @@ export default function LiabilitiesOverview() {
 
   const upcomingRows: UpcomingRow[] = useMemo(() => {
     const cardRows: UpcomingRow[] = (data?.cards ?? []).map((c) => {
-      // #352: only a due date a statement printed (or that was configured); else unknown.
+      // #352, #472: only a due date a statement printed or its owner typed in; a configured due
+      // day (credit_card_accounts, placed in the shown month) is a guess, so it is "unknown".
+      const dueDate = c.due_source === "statement" || c.due_source === "manual" ? c.due_date : null;
       const dueStatus = computeDueStatus({
-        dueDate: c.due_date,
+        dueDate,
         paymentStatus: c.due_status,
         unknownLabel: "Due date unknown",
       });
@@ -134,8 +136,8 @@ export default function LiabilitiesOverview() {
         name: c.card_name,
         typeLabel: "Credit card",
         dueStatus,
-        dueDateLabel: c.due_date ? formatShortDate(c.due_date) : null,
-        sortValue: dueSortValue(dueStatus, c.due_date),
+        dueDateLabel: dueDate ? formatShortDate(dueDate) : null,
+        sortValue: dueSortValue(dueStatus, dueDate),
       };
     });
     const loanRows: UpcomingRow[] = hasLoans
@@ -162,6 +164,11 @@ export default function LiabilitiesOverview() {
     () => filterTransactions(data?.transactions ?? [], txFilter, recurring),
     [data, txFilter, recurring],
   );
+
+  // #472 (V18 of #432): what is owed and when it is due are today's, so they show on the
+  // current month only; another month shows its spend, not today's payment status.
+  const liveMonth = currentMonthYYYYMM();
+  const showsLiveMonth = data?.month === liveMonth;
 
   const delta = data ? data.total_spend - data.prior_month_spend : null;
   const largestCategory = data && data.categories.length > 0 ? data.categories[0] : null;
@@ -309,28 +316,47 @@ export default function LiabilitiesOverview() {
               ))}
             </section>
 
-            <CardBalances baseCurrency={baseCurrency} />
+            {showsLiveMonth ? (
+              <>
+                <CardBalances baseCurrency={baseCurrency} />
 
-            <section>
-              <div className="cashFlowSectionHeading">
-                <p className="wealthEyebrow">Payment timing</p>
-                <h2 className="cashFlowSectionTitle">Upcoming payments</h2>
-              </div>
-              <div className="card">
-                <div className="listRows">
-                  {upcomingRows.map((row) => (
-                    <div className="listRow liabDueRow" key={row.key}>
-                      <div className="listRowMain">
-                        <span className="listRowTitle">{row.name}</span>
-                        <span className="listRowMeta">{row.typeLabel}</span>
-                      </div>
-                      <DueStatusPill status={row.dueStatus} dateLabel={row.dueDateLabel} />
+                <section>
+                  <div className="cashFlowSectionHeading">
+                    <p className="wealthEyebrow">Payment timing</p>
+                    <h2 className="cashFlowSectionTitle">Upcoming payments</h2>
+                  </div>
+                  <div className="card">
+                    <div className="listRows">
+                      {upcomingRows.map((row) => (
+                        <div className="listRow liabDueRow" key={row.key}>
+                          <div className="listRowMain">
+                            <span className="listRowTitle">{row.name}</span>
+                            <span className="listRowMeta">{row.typeLabel}</span>
+                          </div>
+                          <DueStatusPill status={row.dueStatus} dateLabel={row.dueDateLabel} />
+                        </div>
+                      ))}
+                      {upcomingRows.length === 0 && <p className="muted">No upcoming payments.</p>}
                     </div>
-                  ))}
-                  {upcomingRows.length === 0 && <p className="muted">No upcoming payments.</p>}
+                  </div>
+                </section>
+              </>
+            ) : (
+              <section className="card liabLiveOnly" aria-labelledby="liab-live-only-title">
+                <div className="liabLiveOnlyText">
+                  <h2 className="liabLiveOnlyTitle" id="liab-live-only-title">
+                    Balances and payments
+                  </h2>
+                  <p className="muted">
+                    What each card owes and when it&apos;s due are today&apos;s, so they show on{" "}
+                    {monthLabel(liveMonth)} only, not {monthLabel(data.month)}.
+                  </p>
                 </div>
-              </div>
-            </section>
+                <button type="button" className="btn" onClick={() => setMonth(liveMonth)}>
+                  Show {monthLabel(liveMonth)}
+                </button>
+              </section>
+            )}
 
             {hasLoans ? (
               <section>
