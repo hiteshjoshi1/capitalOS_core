@@ -116,3 +116,44 @@ def test_currency_exposure_in_another_base_currency_is_the_same_split(mid_househ
     assert [item["currency"] for item in sgd["items"]] == [item["currency"] for item in usd["items"]]
     for a, b in zip(sgd["items"], usd["items"]):
         assert a["percent"] == pytest.approx(b["percent"], abs=0.02), (a, b)
+
+
+def test_the_inbox_concentration_alert_uses_the_risk_page_threshold(client: TestClient, db_engine, monkeypatch):
+    """#473 (V16): one threshold for "concentrated": the Settings value the Risk page
+    uses (15% by default), not a second one of the Inbox's own."""
+    from types import SimpleNamespace
+
+    from sqlalchemy.orm import Session
+
+    from app.services import insight_alerts
+    from app.services.risk_thresholds import DEFAULT_LARGEST_POSITION_WARN_PCT, largest_position_warn_pct
+    from app.valuation import pages
+
+    holdings = [
+        {"symbol": "VWRA", "value": 100.0, "percent_of_networth": 12.0},
+        {"symbol": "AAPL", "value": 200.0, "percent_of_networth": 20.0},
+    ]
+    monkeypatch.setattr(pages, "risk_summary", lambda *_a, **_k: {"top_holdings": holdings})
+    user = SimpleNamespace(id=CLIENT_USER)
+    with Session(db_engine) as db:
+        assert largest_position_warn_pct(db, CLIENT_USER) == DEFAULT_LARGEST_POSITION_WARN_PCT == 15.0
+        items = insight_alerts.concentration_items(db, user, "SGD")
+    # 20% is above the default 15%: the Risk page shows it red, and the Inbox says so too.
+    assert [(i.kind, i.id) for i in items] == [("concentration", "concentration:AAPL")]
+    assert items[0].title == "AAPL is 20% of your net worth"
+    assert "Above your 15% threshold" in items[0].detail
+
+    client.put("/dashboard/risk-thresholds", json={**NONE, "largest_position_warn_pct": 25})
+    with Session(db_engine) as db:
+        assert largest_position_warn_pct(db, CLIENT_USER) == 25.0
+        assert insight_alerts.concentration_items(db, user, "SGD") == []
+
+
+def test_the_concentration_alert_follows_the_risk_page_rule():
+    from app.services.insight_alerts import concentration_item
+
+    # At the threshold is not concentrated (the Risk page: only above it warns).
+    assert concentration_item([{"symbol": "A", "value": 1.0, "percent_of_networth": 15.0}], 15.0) == []
+    assert concentration_item([], 15.0) == []
+    item = concentration_item([{"symbol": "A", "value": 1.0, "percent_of_networth": 15.5}], 12.5)
+    assert len(item) == 1 and "Above your 12.5% threshold" in item[0].detail

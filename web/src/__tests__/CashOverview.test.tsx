@@ -82,7 +82,7 @@ describe("CashOverview route", () => {
       </ThemeProvider>
     );
 
-    expect(await screen.findByText("CURRENT CASH")).toBeInTheDocument();
+    expect(await screen.findByText("BANK & BROKER CASH")).toBeInTheDocument();
     const cashSitsHeading = screen.getByText("Where the cash sits");
     const currencyHeading = screen.getByText("Currency mix and stablecoins");
     const stablecoinsHeading = screen.getByText("Stablecoins");
@@ -145,12 +145,13 @@ describe("CashOverview races", () => {
     await act(async () =>
       fast.resolve({ ...cashDepositsFixture, is_live: false, as_of_month: lastMonth, current_total: 11111 }),
     );
-    expect(await screen.findByText("S$ 11,111")).toBeInTheDocument();
-    expect(screen.getByText(`CASH — ${lastMonth}`)).toBeInTheDocument();
+    // The headline and the donut's centre (both bank and broker cash, #473).
+    expect((await screen.findAllByText("S$ 11,111")).length).toBeGreaterThan(0);
+    expect(screen.getByText(`BANK & BROKER CASH — ${lastMonth}`)).toBeInTheDocument();
 
     await act(async () => slow.resolve({ ...cashDepositsFixture, current_total: 99999 }));
     expect(screen.queryByText("S$ 99,999")).not.toBeInTheDocument();
-    expect(screen.getByText("S$ 11,111")).toBeInTheDocument();
+    expect(screen.getAllByText("S$ 11,111").length).toBeGreaterThan(0);
     await waitFor(() => expect(slow.signal?.aborted).toBe(true));
   });
 
@@ -246,16 +247,52 @@ describe("CashOverview chart accessibility", () => {
       </ThemeProvider>,
     );
 
-    await screen.findByText("CURRENT CASH");
+    await screen.findByText("BANK & BROKER CASH");
     // 40,000 vs 36,000: +11.1%.
     const chip = document.querySelector(".coHeroValueRow .deltaChip");
     expect(chip).toHaveClass("delta--up");
     expect(chip).toHaveTextContent("▲+11.1%");
   });
 
-  // #232: the Cash headline counts stablecoins, which net worth counts under Crypto (D-42).
-  it("says how much of the headline is stablecoins counted under Crypto in net worth (#232)", async () => {
-    mockApi.cashDeposits.mockResolvedValueOnce({ ...cashDepositsFixture, current_stablecoin_total: 2500 });
+  // #473 (V14, was #232): the headline is bank and broker cash, the cash net worth counts; the
+  // stablecoins (net worth counts them under Crypto, D-42) are a line of their own.
+  it("heads the page with bank & broker cash and shows the stablecoins as their own line (#473)", async () => {
+    mockApi.cashDeposits.mockResolvedValueOnce({
+      ...cashDepositsFixture,
+      total: 42500,
+      current_total: 42500,
+      snapshot_total: 38000,
+      current_stablecoin_total: 2500,
+      snapshot_stablecoin_total: 2000,
+      items: [
+        { source: "DBS", value: 25000, percent: 58.8 },
+        { source: "OCBC", value: 15000, percent: 35.3 },
+        { source: "Ethereum", value: 2500, percent: 5.9 },
+      ],
+      trend: [
+        { month: "2026-01", value: 37000, bank_broker_value: 35000 },
+        { month: "2026-02", value: 42500, bank_broker_value: 40000, is_live: true },
+      ],
+      accounts: [
+        { account_id: 1, kind: "account", label: "DBS Multiplier", platform: "DBS", currencies: ["SGD"], current_value: 25000, snapshot_value: 22000, delta_abs: 3000, last_data_date: "2026-02-20", stale: false },
+        { account_id: null, kind: "stablecoin", label: "Stablecoins · Ethereum", platform: "Ethereum", currencies: ["USD"], current_value: 2500, snapshot_value: 2000, delta_abs: 500, last_data_date: "2026-02-20", stale: null },
+      ],
+      bank_broker: {
+        total: 40000,
+        snapshot_total: 36000,
+        delta_abs: 4000,
+        delta_pct: 4000 / 36000,
+        items: [
+          { source: "DBS", value: 25000, percent: 62.5 },
+          { source: "OCBC", value: 15000, percent: 37.5 },
+        ],
+        currency_breakdown: [
+          { currency: "SGD", current_value: 25000, snapshot_value: 22000, delta_abs: 3000, delta_pct: 3000 / 22000 },
+          { currency: "USD", current_value: 15000, snapshot_value: 14000, delta_abs: 1000, delta_pct: 1000 / 14000 },
+        ],
+        snapshot_missing: false,
+      },
+    });
 
     render(
       <ThemeProvider>
@@ -265,9 +302,21 @@ describe("CashOverview chart accessibility", () => {
       </ThemeProvider>,
     );
 
-    expect(
-      await screen.findByText(/Includes S\$ 2,500 in stablecoins, which net worth counts under Crypto/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("BANK & BROKER CASH")).toBeInTheDocument();
+    expect(document.querySelector(".coHeroValue")).toHaveTextContent("S$ 40,000");
+    // 40,000 vs 36,000: the change of bank and broker cash, not of the total with stablecoins.
+    expect(document.querySelector(".coHeroValueRow .deltaChip")).toHaveTextContent("▲+11.1%");
+    const line = screen.getByTestId("cash-stablecoin-line");
+    expect(line).toHaveTextContent("Stablecoins (USDC / USDT)");
+    expect(line).toHaveTextContent("S$ 2,500");
+    expect(line).toHaveTextContent("Not in this total: net worth counts them under Crypto");
+    // Where it sits, the account table and the trend: bank and broker cash only.
+    expect(screen.getByRole("img", { name: "Cash by account" })).toHaveAccessibleDescription(
+      "Cash by account: DBS 62.5%, OCBC 37.5%",
+    );
+    expect(screen.getByTestId("cash-accounts")).not.toHaveTextContent("Stablecoins · Ethereum");
+    expect(screen.getByRole("img", { name: "Six-month cash trend" })).toHaveAccessibleDescription(/Jan '26 S\$ 35K/);
+    expect(screen.getByText("S$ 15,000 (+S$ 1,000)")).toBeInTheDocument();
   });
 
   it("names no stablecoins when there are none (#232)", async () => {
@@ -281,8 +330,27 @@ describe("CashOverview chart accessibility", () => {
       </ThemeProvider>,
     );
 
-    await screen.findByText("CURRENT CASH");
-    expect(screen.queryByText(/in stablecoins/)).not.toBeInTheDocument();
+    await screen.findByText("BANK & BROKER CASH");
+    expect(screen.queryByTestId("cash-stablecoin-line")).not.toBeInTheDocument();
+  });
+
+  it("an API without bank_broker: the headline is the total less its stablecoins (#473)", async () => {
+    mockApi.cashDeposits.mockResolvedValueOnce({
+      ...cashDepositsFixture,
+      current_total: 42500,
+      current_stablecoin_total: 2500,
+      snapshot_total: 38000,
+      snapshot_stablecoin_total: 2000,
+    });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    await screen.findByText("BANK & BROKER CASH");
+    expect(document.querySelector(".coHeroValue")).toHaveTextContent("S$ 40,000");
   });
 });
 

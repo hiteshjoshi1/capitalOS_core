@@ -226,11 +226,14 @@ function SplitBar({
   items,
   formatMoney,
   colors,
+  note,
 }: {
   cardTitle?: string;
   items: CashFlowBreakdownItem[];
   formatMoney: FormatMoney;
   colors?: string[];
+  /** One line under the legend saying how the split is made. */
+  note?: string;
 }) {
   const palette = colors ?? ["var(--accent)", "var(--warn)"];
   return (
@@ -254,6 +257,7 @@ function SplitBar({
               </span>
             ))}
           </div>
+          {note ? <p className="muted cashFlowSplitBarNote">{note}</p> : null}
         </>
       ) : (
         <p className="muted">No split available for this month.</p>
@@ -735,6 +739,7 @@ function ExpensesTab({
             cardTitle="Recurring vs. non-recurring"
             items={detail.analytics.outflow_recurring_split}
             formatMoney={formatMoney}
+            note="Recurring: about the same amount once a month for 3+ months, or rent, salary, insurance and the like."
           />
           <SplitBar
             cardTitle="Fixed vs. variable"

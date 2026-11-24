@@ -1,8 +1,10 @@
 """The Risk page's concentration thresholds, per user (#253, D-68).
 
 Stored on ``user_preferences`` (migration 080). Each is the percent above which
-the Risk page calls a figure concentrated; NULL means the app's default, which
-lives in the web app (``web/src/lib/risk.ts``), so the API returns None for it.
+the Risk page calls a figure concentrated; NULL means the app's default, so the API
+returns None for it. The defaults live in the web app (``DEFAULT_RISK_THRESHOLDS`` in
+``web/src/lib/risk.ts``) and, for the one the server uses itself, here too: the Inbox's
+concentration alert reads the same largest-position threshold as the Risk page (#473, V16).
 """
 from __future__ import annotations
 
@@ -11,6 +13,10 @@ from typing import Any, Mapping, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+# The app's default largest-position threshold, % of net worth: the same as
+# DEFAULT_RISK_THRESHOLDS.largestPositionWarnPct in web/src/lib/risk.ts (a test reads both).
+DEFAULT_LARGEST_POSITION_WARN_PCT = 15.0
 
 # API field -> user_preferences column.
 THRESHOLD_COLUMNS = {
@@ -53,3 +59,10 @@ def save_risk_thresholds(db: Session, user_id: int, values: Mapping[str, Optiona
     )
     db.commit()
     return read_risk_thresholds(db, user_id)
+
+
+def largest_position_warn_pct(db: Session, user_id: int) -> float:
+    """The largest-position threshold in effect for the user: their Settings value, else
+    the default. The Risk page and the Inbox's concentration alert both use it (#473)."""
+    value = read_risk_thresholds(db, user_id)["largest_position_warn_pct"]
+    return value if value is not None else DEFAULT_LARGEST_POSITION_WARN_PCT

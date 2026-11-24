@@ -4,8 +4,9 @@ Four checks, each cheap and each with one action:
 - **month_closed_stale**: the latest completed month closed while a source's newest data
   was stale for it, or carried from before the month began (History's per-month
   freshness, D-29). Its figures are partly carried.
-- **concentration**: the largest single holding is above CONCENTRATION_PCT of net worth
-  (Risk's top holdings, live for the open month).
+- **concentration**: the largest single holding is above the user's largest-position
+  threshold (Settings → Risk thresholds, the one the Risk page uses; 15% by default, #473)
+  of net worth (Risk's top holdings, live for the open month).
 - **unusual_move**: the latest completed month's net-worth change is far outside the
   usual: at least UNUSUAL_MOVE_FACTOR times the median monthly change of the year before
   it, and at least UNUSUAL_MOVE_MIN_PCT of the month's starting net worth.
@@ -13,8 +14,8 @@ Four checks, each cheap and each with one action:
   appeared within the last two months, or one this month above its usual amount by at
   least RECURRING_UP_PCT (and RECURRING_UP_MIN in base currency).
 
-Thresholds are module constants, overridable by the environment variables of the same
-name (``INBOX_<NAME>``); none are stored per user yet.
+The other thresholds are module constants, overridable by the environment variables of the
+same name (``INBOX_<NAME>``); they aren't stored per user yet.
 """
 from __future__ import annotations
 
@@ -37,7 +38,6 @@ def _env_number(name: str, default: float) -> float:
         return default
 
 
-CONCENTRATION_PCT = _env_number("CONCENTRATION_PCT", 25.0)
 UNUSUAL_MOVE_FACTOR = _env_number("UNUSUAL_MOVE_FACTOR", 3.0)
 UNUSUAL_MOVE_MIN_PCT = _env_number("UNUSUAL_MOVE_MIN_PCT", 5.0)
 UNUSUAL_MOVE_HISTORY = 12  # months of changes the "usual" is taken from (at least 3 needed)
@@ -104,16 +104,23 @@ def _platform(code: Optional[str]) -> str:
 
 
 def concentration_items(db: Session, user: CurrentUser, base: str) -> list[InboxItem]:
+    from app.services.risk_thresholds import largest_position_warn_pct
     from app.valuation import pages
 
     month = _open_month()
     summary = pages.risk_summary(db, user.id, month, _month_start(month), base)
-    top = summary.get("top_holdings") or []
-    if not top:
+    return concentration_item(summary.get("top_holdings") or [], largest_position_warn_pct(db, user.id))
+
+
+def concentration_item(top_holdings: list[dict[str, Any]], threshold_pct: float) -> list[InboxItem]:
+    """The largest holding if its share of net worth is above ``threshold_pct``. The Risk
+    page's rule (``web/src/lib/risk.ts``): the largest by value, and only above the
+    threshold is concentrated (at it is not)."""
+    if not top_holdings:
         return []
-    largest = top[0]
+    largest = max(top_holdings, key=lambda row: float(row.get("value") or 0))
     share = float(largest.get("percent_of_networth") or 0)
-    if share < CONCENTRATION_PCT:
+    if share <= threshold_pct:
         return []
     symbol = str(largest.get("symbol") or "Your largest holding")
     return [InboxItem(
@@ -121,7 +128,7 @@ def concentration_items(db: Session, user: CurrentUser, base: str) -> list[Inbox
         kind="concentration",
         severity="low",
         title=f"{symbol} is {share:.0f}% of your net worth",
-        detail=f"Above your {CONCENTRATION_PCT:.0f}% threshold for one holding.",
+        detail=f"Above your {threshold_pct:g}% threshold for one holding (Settings → Risk thresholds).",
         action=InboxAction(label="Open Risk", route="/risk"),
     )]
 
