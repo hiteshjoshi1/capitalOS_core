@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { DividendCompanyItem, StockHolding, StockPlatformTotal } from "../lib/api";
@@ -114,6 +115,12 @@ export default function StockHoldings() {
     typeof window === "undefined" ? false : window.innerWidth <= MOBILE_BREAKPOINT_PX,
   );
   const columnMenuRef = useRef<HTMLDetailsElement>(null);
+  // #474 (V4): filter the positions by name or ticker; on a phone each one is a one-line row
+  // that opens for its details.
+  const [query, setQuery] = useState<string>("");
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set());
+  const rowIdPrefix = useId();
+  const positionsHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT_PX);
@@ -332,11 +339,34 @@ export default function StockHoldings() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
-  const visibleHoldings = rows.slice(0, visibleCount);
+  const trimmedQuery = query.trim().toLowerCase();
+  const shownRows = useMemo(
+    () => (trimmedQuery
+      ? rows.filter((h) => h.symbol.toLowerCase().includes(trimmedQuery) || (h.name ?? "").toLowerCase().includes(trimmedQuery))
+      : rows),
+    [rows, trimmedQuery],
+  );
+  const matchingHeld = trimmedQuery ? shownRows.filter((h) => h.month_change?.side !== "sold").length : holdings.length;
+  const visibleHoldings = shownRows.slice(0, visibleCount);
   const visibleColumnCount = 1 + STOCK_COLUMN_OPTIONS.filter((option) => visibleColumns[option.key]).length;
-  const hasMore = visibleCount < rows.length;
+  const hasMore = visibleCount < shownRows.length;
   const hasPrevious = visibleCount > PAGE_SIZE;
-  const paged = rows.length > PAGE_SIZE;
+  const paged = shownRows.length > PAGE_SIZE;
+  const noRowsText = trimmedQuery && rows.length > 0 ? `No holdings match "${query.trim()}".` : "No holdings available.";
+  const toggleRow = (key: string) =>
+    setExpandedRows((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  // #474 (V4): on a phone the positions come after five sections; this jumps straight there.
+  const jumpToPositions = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    const heading = positionsHeadingRef.current;
+    heading?.scrollIntoView?.({ block: "start" });
+    heading?.focus({ preventScroll: true });
+  };
   const platformTotals: StockPlatformTotal[] = summary?.platform_totals ?? [];
   const stockCurrentTotal = summary?.stock_current_total ?? 0;
   const geographyPieItems = useMemo(
@@ -445,6 +475,15 @@ export default function StockHoldings() {
               </p>
             ) : null}
           </article>
+
+          {/* ── Jump to the positions on a phone (#474, V4) ─────────────── */}
+          {isMobile ? (
+            <nav className="stockJumpBar" aria-label="On this page">
+              <a className="stockJumpLink" href="#stock-positions" onClick={jumpToPositions}>
+                Positions ({holdings.length}) <span aria-hidden="true">↓</span>
+              </a>
+            </nav>
+          ) : null}
 
           {/* ── Realised P&L on sales (#293) ──────────────────────────── */}
           <RealisedPnlCard month={month} baseCurrency={baseCurrency} />
@@ -584,17 +623,30 @@ export default function StockHoldings() {
           </section>
 
           {/* ── Holdings table ────────────────────────────────────────── */}
-          <section aria-label="Top holdings">
+          <section aria-label="Top holdings" id="stock-positions" className="stockPositionsSection">
             <div className="coSectionHeader">
               <div>
                 <p className="coEyebrow">POSITIONS</p>
-                <h2 className="coSectionTitle">Top Holdings</h2>
+                <h2 className="coSectionTitle" ref={positionsHeadingRef} tabIndex={-1}>Top Holdings</h2>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span className="muted" style={{ fontSize: "13px" }}>
-                  {paged ? `${Math.min(visibleHoldings.length, holdings.length)} of ` : ""}{holdings.length} {holdings.length === 1 ? "position" : "positions"}
-                  {soldHoldings.length > 0 ? ` · ${soldHoldings.length} sold since ${compareLabel}` : ""}
+                  {trimmedQuery
+                    ? `${matchingHeld} of ${holdings.length} ${holdings.length === 1 ? "position" : "positions"} match`
+                    : `${paged ? `${Math.min(visibleHoldings.length, holdings.length)} of ` : ""}${holdings.length} ${holdings.length === 1 ? "position" : "positions"}`}
+                  {!trimmedQuery && soldHoldings.length > 0 ? ` · ${soldHoldings.length} sold since ${compareLabel}` : ""}
                 </span>
+                <input
+                  type="search"
+                  className="stockSearchInput"
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
+                  placeholder="Search name or ticker"
+                  aria-label="Search holdings by name or ticker"
+                />
                 <label className="stockSortControl">
                   <span>Sort</span>
                   <select value={sortKey} onChange={(event) => handleSort(event.target.value as SortKey)} aria-label="Sort holdings by">
@@ -640,73 +692,115 @@ export default function StockHoldings() {
             </div>
             <div className="card stockHoldingsPrimaryCard">
               {isMobile ? (
-                <div className="stockHoldingsMobileList">
+                <ul className="stockHoldingsMobileList">
                   {visibleHoldings.map((h, idx) => {
                     const sold = h.month_change?.side === "sold";
                     const mobilePnl = sold ? null : formatPnl(h);
                     const priceAge = holdingPriceAge(h, isLive);
+                    const rowKey = `${sold ? "sold" : "held"}-${h.asset_id ?? `${h.symbol}-${idx}`}`;
+                    const expanded = expandedRows.has(rowKey);
+                    const detailsId = `${rowIdPrefix}-${idx}`;
+                    // The one figure next to the value: the change when sorted by it, else P&L %.
+                    // As in StockMonthChange (#251), a purchase, sale or new holding isn't coloured.
+                    const change = h.month_change;
+                    const changeIsMarket = change != null && change.side === "held" && !change.baseline_missing
+                      && Math.abs(change.quantity_effect) < 1;
+                    const metric = sold
+                      ? { text: "Sold", label: `sold since ${compareLabel}`, className: "muted" }
+                      : sortKey === "change" && change && !change.baseline_missing
+                        ? {
+                            label: `change since ${compareLabel}`,
+                            text: change.pct != null
+                              ? fmt.formatPercent(change.pct, { signed: true })
+                              : fmt.formatSignedMoney(change.abs, shownCurrency),
+                            className: changeIsMarket ? PNL_CLASS[deltaDirection(change.abs)] : "",
+                          }
+                        : mobilePnl?.pct != null
+                          ? { label: "profit and loss", text: fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" }), className: PNL_CLASS[mobilePnl.direction] }
+                          : { label: "no profit and loss", text: fmt.MISSING, className: "muted" };
+                    const staleMark = !sold && isLive && priceAge.stale;
+                    const value = sold ? formatMoney(0) : formatMoney(h.value);
                     return (
-                      <article className="stockHoldingsMobileCard" key={`${sold ? "sold" : "held"}-${h.asset_id ?? `${h.symbol}-${idx}`}`}>
-                        <div className="stockHoldingsMobileHeader">
-                          <div>
-                            <div className="stockHoldingsMobileTitleLine">
-                              <strong className="stockHoldingsMobileTitle">{h.name ?? h.symbol}</strong>
-                              <span className="stockHoldingsExchangePill">{formatExchangeLabel(h)}</span>
+                      <li className={`stockHoldingsMobileCard${expanded ? " stockHoldingsMobileCard--open" : ""}`} key={rowKey}>
+                        <button
+                          type="button"
+                          className="stockCompactRow"
+                          aria-expanded={expanded}
+                          aria-controls={detailsId}
+                          aria-label={`${h.symbol}${h.name ? ` ${h.name}` : ""}: ${value}, ${sold ? metric.label : `${metric.label} ${metric.text}`}${staleMark ? ", stale price" : ""}`}
+                          onClick={() => toggleRow(rowKey)}
+                        >
+                          <span className="stockCompactName">
+                            <strong className="stockCompactSymbol">{h.symbol}</strong>
+                            <span className="stockCompactFullName">{h.name ?? ""}</span>
+                            {staleMark ? <span className="stockCompactStale priceAge--stale">stale</span> : null}
+                          </span>
+                          <span className="stockCompactValue">{value}</span>
+                          <span className={`stockCompactMetric ${metric.className}`}>{metric.text}</span>
+                          <span className="stockCompactChevron" aria-hidden="true" />
+                        </button>
+                        {expanded ? (
+                          <div className="stockHoldingsMobileDetails" id={detailsId}>
+                            <div className="stockHoldingsMobileHeader">
+                              <div className="stockHoldingsMobileTitleLine">
+                                <strong className="stockHoldingsMobileTitle">{h.name ?? h.symbol}</strong>
+                                <span className="stockHoldingsExchangePill">{formatExchangeLabel(h)}</span>
+                              </div>
+                              <div className="stockHoldingsMobileMeta">
+                                {formatPlatformLabel(h.platform ?? "—")}{sold ? null : ` · ${formatGeoLabel(h.geo)}`}
+                              </div>
                             </div>
-                            <div className="stockHoldingsMobileMeta">
-                              {formatPlatformLabel(h.platform ?? "—")}{sold ? null : ` · ${formatGeoLabel(h.geo)}`}
+                            {sold ? null : (
+                            <div className="stockHoldingsMobileMetrics">
+                              {isLive ? (
+                                <span className={`stockHoldingsFreshnessTag stockHoldingsFreshnessTag${(h.quote_freshness_status ?? "").toLowerCase() === "fresh" ? "Fresh" : "Stale"}`}>
+                                  {formatFreshnessLabel(h.quote_freshness_status)}
+                                </span>
+                              ) : null}
+                              {h.price_fallback_reason && (
+                                <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} platform={h.platform} />
+                              )}
+                              <div className="stockHoldingsMobileValueBlock">
+                                <strong>{formatMoney(h.value)}</strong>
+                                <span>{fmt.formatPercent(h.percent_of_networth, { scale: "points" })} NW</span>
+                              </div>
+                              {mobilePnl ? (
+                                <div className={`stockHoldingsMobilePnlBlock ${PNL_CLASS[mobilePnl.direction]}`} title={mobilePnl.native ?? undefined}>
+                                  <strong><DeltaArrow direction={mobilePnl.direction} />{mobilePnl.amount}</strong>
+                                  {mobilePnl.pct == null ? null : <span>{fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" })}</span>}
+                                </div>
+                              ) : null}
                             </div>
-                          </div>
-                        </div>
-                        {sold ? null : (
-                        <div className="stockHoldingsMobileMetrics">
-                          {isLive ? (
-                            <span className={`stockHoldingsFreshnessTag stockHoldingsFreshnessTag${(h.quote_freshness_status ?? "").toLowerCase() === "fresh" ? "Fresh" : "Stale"}`}>
-                              {formatFreshnessLabel(h.quote_freshness_status)}
-                            </span>
-                          ) : null}
-                          {h.price_fallback_reason && (
-                            <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} platform={h.platform} />
-                          )}
-                          <div className="stockHoldingsMobileValueBlock">
-                            <strong>{formatMoney(h.value)}</strong>
-                            <span>{fmt.formatPercent(h.percent_of_networth, { scale: "points" })} NW</span>
-                          </div>
-                          {mobilePnl ? (
-                            <div className={`stockHoldingsMobilePnlBlock ${PNL_CLASS[mobilePnl.direction]}`} title={mobilePnl.native ?? undefined}>
-                              <strong><DeltaArrow direction={mobilePnl.direction} />{mobilePnl.amount}</strong>
-                              {mobilePnl.pct == null ? null : <span>{fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" })}</span>}
-                            </div>
-                          ) : null}
-                        </div>
-                        )}
-                        {visibleColumns.monthChange ? (
-                          <div className="stockHoldingsMobileChange">
-                            <span className="muted">Since {compareLabel}</span>
-                            <StockMonthChange
-                              change={h.month_change}
-                              currency={shownCurrency}
-                              compareLabel={compareLabel}
-                              symbol={h.symbol}
-                              layout="card"
-                            />
+                            )}
+                            {visibleColumns.monthChange ? (
+                              <div className="stockHoldingsMobileChange">
+                                <span className="muted">Since {compareLabel}</span>
+                                <StockMonthChange
+                                  change={h.month_change}
+                                  currency={shownCurrency}
+                                  compareLabel={compareLabel}
+                                  symbol={h.symbol}
+                                  layout="card"
+                                />
+                              </div>
+                            ) : null}
+                            {!sold && visibleColumns.dividends ? (
+                              <DividendsLine holding={h} dividends={shownDividends} currency={shownCurrency} layout="card" />
+                            ) : null}
+                            {sold ? null : (
+                              <small className={`priceAge stockHoldingsMobilePriceAge${priceAge.stale ? " priceAge--stale" : ""}`}>
+                                {priceAge.text}
+                              </small>
+                            )}
                           </div>
                         ) : null}
-                        {!sold && visibleColumns.dividends ? (
-                          <DividendsLine holding={h} dividends={shownDividends} currency={shownCurrency} layout="card" />
-                        ) : null}
-                        {sold ? null : (
-                          <small className={`priceAge stockHoldingsMobilePriceAge${priceAge.stale ? " priceAge--stale" : ""}`}>
-                            {priceAge.text}
-                          </small>
-                        )}
-                      </article>
+                      </li>
                     );
                   })}
-                  {summary && rows.length === 0 && (
-                    <p className="muted">No holdings available.</p>
+                  {summary && shownRows.length === 0 && (
+                    <li className="muted stockHoldingsMobileEmpty">{noRowsText}</li>
                   )}
-                </div>
+                </ul>
               ) : (
                 <div className="stockHoldingsTableWrap">
                   <table className="table stockHoldingsTable">
@@ -821,9 +915,9 @@ export default function StockHoldings() {
                           </tr>
                         );
                       })}
-                      {summary && rows.length === 0 && (
+                      {summary && shownRows.length === 0 && (
                         <tr>
-                          <td className="muted" colSpan={visibleColumnCount}>No holdings available.</td>
+                          <td className="muted" colSpan={visibleColumnCount}>{noRowsText}</td>
                         </tr>
                       )}
                     </tbody>
@@ -843,7 +937,7 @@ export default function StockHoldings() {
                   <button
                     type="button"
                     className="btn"
-                    onClick={() => setVisibleCount((current) => Math.min(rows.length, current + PAGE_SIZE))}
+                    onClick={() => setVisibleCount((current) => Math.min(shownRows.length, current + PAGE_SIZE))}
                     disabled={!hasMore}
                   >
                     Next
