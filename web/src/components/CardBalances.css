@@ -142,3 +142,71 @@
   gap: 8px;
   align-items: center;
 }
+
+/* #472 (V19 of #432): one "Update balances" sheet for every card, not a form under each. */
+.cardBalancesHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.cardBalanceSheet {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cardBalanceSheetIntro {
+  margin: 0;
+  font-size: 13px;
+}
+
+.cardBalanceSheetCard {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 0 12px;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.cardBalanceSheetCard legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.cardBalanceSheetHint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.cardBalanceSheetFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 12px;
+}
+
+.cardBalanceSheetFields label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.cardBalanceSheetFields input {
+  min-height: 36px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.cardBalanceSheetCard .cardBalanceWarn {
+  margin: 0;
+  font-size: 13px;
+}
