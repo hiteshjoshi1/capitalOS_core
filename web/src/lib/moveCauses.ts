@@ -2,7 +2,7 @@ import type { MoveCause, MoveCauses } from "./api";
 import * as fmt from "./format";
 
 /** The backend's none_reason wording (app/valuation/move_causes.py NONE_REASON). */
-export const NO_DATA_CAUSE = "No data cause found: a market move";
+export const NO_DATA_CAUSE = "Mostly market moves; no new statement or account explains it.";
 
 /** Causes sized at a value (what's new), not at a change. */
 const VALUE_CAUSES = new Set(["first_statement", "new_position", "price_fallback"]);

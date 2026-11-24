@@ -202,15 +202,15 @@ describe("CryptoHoldings route", () => {
 
     expect(await screen.findByText("Top holdings")).toBeInTheDocument();
     expect(screen.queryByText("DUST")).not.toBeInTheDocument();
-    expect(screen.getByText(/Showing 1 of 2 holdings · 1 hidden under USD 10/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 1 of 2 holdings · 1 hidden under S\$ 10/)).toBeInTheDocument();
     expect(screen.getByText(/stale\)/)).toBeInTheDocument();
     expect(screen.getByText(/refreshing/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("checkbox", { name: /Show holdings under USD 10/i }));
+    await user.click(screen.getByRole("checkbox", { name: /Show holdings under S\$ 10/i }));
     await waitFor(() => {
       expect(screen.getByText("DUST")).toBeInTheDocument();
     });
-    expect(screen.getByText(/Showing all 2 holdings, including dust under USD 10/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing all 2 holdings, including dust under S\$ 10/)).toBeInTheDocument();
   });
 
   it("shows Coinbase exchange holdings and wallet exposure from the crypto summary", async () => {

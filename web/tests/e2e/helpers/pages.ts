@@ -27,7 +27,6 @@ export const MAIN_ROUTES = [
   "/platforms",
   "/add?what=wallet",
   "/market-data",
-  "/alerts",
   "/settings",
 ];
 

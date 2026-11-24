@@ -39,7 +39,7 @@ BIG_MOVE_PCT = Decimal(5)
 SIGNIFICANT_SHARE = Decimal("0.2")
 CAUSE_MIN = Decimal(1000)
 CATCH_UP_DAYS = 45
-NONE_REASON = "No data cause found: a market move"
+NONE_REASON = "Mostly market moves; no new statement or account explains it."
 _EPS = Decimal("1e-9")
 
 

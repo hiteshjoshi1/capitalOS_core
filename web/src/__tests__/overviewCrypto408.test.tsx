@@ -7,9 +7,12 @@ import SinceLastVisitStrip from "../components/SinceLastVisitStrip";
 import StockMonthChange from "../components/StockMonthChange";
 import { api, type SinceLastVisit, type StockMonthChange as Change } from "../lib/api";
 import { hasNews } from "../lib/sinceLastVisit";
+import { clearApiCache } from "../lib/useApiResource";
+import InboxBell from "../components/InboxBell";
+import type { InboxResponse } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
-  api: { sinceLastVisit: vi.fn(), markVisit: vi.fn() },
+  api: { sinceLastVisit: vi.fn(), markVisit: vi.fn(), operationsInbox: vi.fn() },
 }));
 const mockApi = vi.mocked(api, true);
 
@@ -25,7 +28,21 @@ const visit = (over: Partial<SinceLastVisit> = {}): SinceLastVisit => ({
   ...over,
 });
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  clearApiCache();
+});
+
+const inboxOf = (count: number): InboxResponse => ({
+  as_of: "2026-11-12",
+  count,
+  items: Array.from({ length: count }, (_, i) => ({
+    id: `item:${i}`, kind: "source_overdue", severity: "medium", title: `Item ${i}`, detail: null, source: null,
+    action: { label: "Open", route: "/operations", params: {}, run: null, admin_only: false },
+  })),
+  all_good: [],
+  recent_activity: [],
+});
 
 describe("Since your last visit (#408, U3)", () => {
   it("has news only for a real change, imports or actions", () => {
@@ -38,6 +55,7 @@ describe("Since your last visit (#408, U3)", () => {
 
   it("shows the change, imports and actions, records the visit, and dismiss moves the mark", async () => {
     mockApi.sinceLastVisit.mockResolvedValue(visit());
+    mockApi.operationsInbox.mockResolvedValue(inboxOf(1));
     mockApi.markVisit.mockResolvedValue({ moved: true, seen_at: "2026-11-12T01:00:00+00:00" });
     render(
       <MemoryRouter>
@@ -55,8 +73,51 @@ describe("Since your last visit (#408, U3)", () => {
     expect(screen.queryByRole("complementary", { name: "Since your last visit" })).not.toBeInTheDocument();
   });
 
+  it("counts what needs action from the bell's inbox, so the two always agree (#475, V22)", async () => {
+    // The visit reply counted 3 when it was built; the inbox (the bell) now has 2.
+    mockApi.sinceLastVisit.mockResolvedValue(visit({ needs_action: 3 }));
+    mockApi.markVisit.mockResolvedValue({ moved: false, seen_at: "2026-11-10T13:40:00+00:00" });
+    mockApi.operationsInbox.mockResolvedValue(inboxOf(2));
+    render(
+      <MemoryRouter>
+        <InboxBell narrow />
+        <SinceLastVisitStrip baseCurrency="SGD" />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("link", { name: "2 need action" })).toHaveAttribute("href", "/operations");
+    expect(screen.getByRole("link", { name: "2 items need you" })).toBeInTheDocument();
+    expect(screen.queryByText(/3 need action/)).not.toBeInTheDocument();
+    expect(mockApi.operationsInbox).toHaveBeenCalledTimes(1); // one request for both
+  });
+
+  it("falls back to the visit's own count when the inbox can't load", async () => {
+    mockApi.sinceLastVisit.mockResolvedValue(visit({ change: null, imports_since: 0, needs_action: 3 }));
+    mockApi.markVisit.mockResolvedValue({ moved: false, seen_at: "x" });
+    mockApi.operationsInbox.mockRejectedValue(new Error("inbox down"));
+    render(
+      <MemoryRouter>
+        <SinceLastVisitStrip baseCurrency="SGD" />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("link", { name: "3 need action" })).toBeInTheDocument();
+  });
+
+  it("drops the strip when its only news was actions the inbox no longer has", async () => {
+    mockApi.sinceLastVisit.mockResolvedValue(visit({ change: null, imports_since: 0, needs_action: 2 }));
+    mockApi.markVisit.mockResolvedValue({ moved: false, seen_at: "x" });
+    mockApi.operationsInbox.mockResolvedValue(inboxOf(0));
+    render(
+      <MemoryRouter>
+        <SinceLastVisitStrip baseCurrency="SGD" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(mockApi.markVisit).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Since your last visit" })).not.toBeInTheDocument());
+  });
+
   it("shows nothing on a first visit", async () => {
     mockApi.sinceLastVisit.mockResolvedValue({ first_visit: true, base_currency: "SGD" });
+    mockApi.operationsInbox.mockResolvedValue(inboxOf(0));
     mockApi.markVisit.mockResolvedValue({ moved: true, seen_at: "x" });
     const { container } = render(
       <MemoryRouter>

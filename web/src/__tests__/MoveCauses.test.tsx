@@ -50,8 +50,8 @@ describe("move causes (#289)", () => {
     expect(note).toHaveTextContent("Also: 2 holding(s) at their statement price · S$ 1,500");
     expect(screen.queryByTestId("move-cause-price_fallback")).not.toBeInTheDocument();
 
-    render(<MoveCausesList currency="SGD" data={data({ is_big_move: true, none_reason: "No data cause found: a market move" })} />);
-    expect(screen.getByText("No data cause found: a market move")).toBeInTheDocument();
+    render(<MoveCausesList currency="SGD" data={data({ is_big_move: true, none_reason: "Mostly market moves; no new statement or account explains it." })} />);
+    expect(screen.getByText("Mostly market moves; no new statement or account explains it.")).toBeInTheDocument();
   });
 
   it("Overview reads the month bridge's causes and hides when there's nothing to say", async () => {

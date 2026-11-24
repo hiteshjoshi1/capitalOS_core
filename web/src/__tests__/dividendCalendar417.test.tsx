@@ -75,6 +75,9 @@ describe("dividend calendar (U17)", () => {
     expect(screen.getByText(/Ex-date 13 Nov 2026/)).toBeInTheDocument();
     expect(screen.getByText(/2 of 5 holdings expected to pay · 2 usually pay at other times of year · 1 with no dividend history/)).toBeInTheDocument();
     expect(mockApi.dividendCalendar).toHaveBeenCalledWith("SGD", 3);
+    // #475 (V15): the heading names the span the month tiles cover, not "next 3 months".
+    expect(screen.getByRole("heading", { name: "Dividends expected, 12 Nov – 11 Feb" })).toBeInTheDocument();
+    expect(screen.queryByText(/next 3 months/)).not.toBeInTheDocument();
   });
 
   it("says so when nothing is expected", async () => {

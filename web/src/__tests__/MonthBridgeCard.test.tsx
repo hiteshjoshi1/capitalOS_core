@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import MonthBridgeCard from "../components/MonthBridgeCard";
-import { BRIDGE_LINKS } from "../lib/monthBridge";
+import { BRIDGE_LINKS, isShownBridgeLine } from "../lib/monthBridge";
 import { api } from "../lib/api";
 import type { BridgeLine, MonthBridge } from "../lib/api";
 import { clearApiCache } from "../lib/useApiResource";
@@ -162,6 +162,31 @@ describe("<MonthBridgeCard>", () => {
     expect(within(row).getByText("Deposits")).toBeInTheDocument();
     expect(within(row).getByText(/not new money: S\$ 2,000/)).toBeInTheDocument();
     expect(within(row).getByRole("link", { name: BRIDGE_LINKS.new_money.label })).toHaveAttribute("href", "/cash");
+  });
+
+  it("shows New money in only when there is some (#475, V9)", async () => {
+    const bridge = makeBridge();
+    const zero = line("new_money", "New money in", 0, {
+      parts: [
+        { key: "deposits", label: "Deposits", amount: 0 },
+        { key: "withdrawals", label: "Withdrawals", amount: 0 },
+      ],
+    });
+    mockApi.monthBridge.mockResolvedValue({ ...bridge, lines: [zero, ...bridge.lines.slice(1)] });
+    renderCard();
+    await screen.findByTestId("bridge-line-markets");
+    expect(screen.queryByTestId("bridge-line-new_money")).not.toBeInTheDocument();
+    expect(screen.queryByText("New money in")).not.toBeInTheDocument();
+  });
+
+  it("keeps a zero New money line that has something to say (in and out cancel, an estimate)", () => {
+    const zero = line("new_money", "New money in", 0);
+    expect(isShownBridgeLine(zero)).toBe(false);
+    expect(isShownBridgeLine({ ...zero, status: "partial" })).toBe(true);
+    expect(isShownBridgeLine({ ...zero, parts: [{ key: "deposits", label: "Deposits", amount: 500 }, { key: "withdrawals", label: "Withdrawals", amount: -500 }] })).toBe(true);
+    // Transfers from your own accounts aren't new money: a note alone doesn't keep the line.
+    expect(isShownBridgeLine({ ...zero, notes: [{ key: "internal_transfers", label: "1 transfer(s)", amount: 100 }] })).toBe(false);
+    expect(isShownBridgeLine(line("fx", "FX", 0))).toBe(true);
   });
 
   it("opens the unexplained rest to its named parts and links each line to its page", async () => {
