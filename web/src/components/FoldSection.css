@@ -1,0 +1,49 @@
+/* #474 (V21): a section that folds on a phone; its heading is the <summary>. */
+.foldSection {
+  display: block;
+}
+
+.foldSectionSummary {
+  position: relative;
+  list-style: none;
+  cursor: pointer;
+  padding-right: 32px;
+  border-radius: 10px;
+}
+
+.foldSectionSummary::-webkit-details-marker {
+  display: none;
+}
+
+.foldSectionSummary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* A closed fold keeps the heading's spacing off: the next section's gap is enough. */
+.foldSection:not([open]) .foldSectionSummary > * {
+  margin-bottom: 0;
+}
+
+/* Level with the title (under the eyebrow), not the middle of a heading with a description. */
+.foldSectionChevron {
+  position: absolute;
+  right: 8px;
+  top: 34px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-75%) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.foldSection[open] > .foldSectionSummary .foldSectionChevron {
+  transform: translateY(-25%) rotate(-135deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foldSectionChevron {
+    transition: none;
+  }
+}

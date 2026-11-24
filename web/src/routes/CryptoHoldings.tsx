@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type CryptoSummary, type TokenVisibility } from "../lib/api";
 import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
@@ -7,6 +7,7 @@ import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber,
 import { noDataFor, noRateFor } from "../lib/delta";
 import { chartColor } from "../lib/chartColors";
 import "../App.css";
+import "./OperationsInbox.css";
 import "./CryptoHoldings.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
@@ -280,16 +281,18 @@ export default function CryptoHoldings() {
                         {h.hidden && (
                           <span className="tag">{h.hidden_reason === "user_hidden" ? "Hidden" : "Unknown token"}</span>
                         )}
-                        {h.contract_or_mint && (
-                          <button
-                            type="button"
-                            className="btn btnSmall cryptoVisibilityBtn"
+                        {/* #474 (V13): the spam action sits in a ⋯ menu, only on unknown tokens
+                            (#342's rule: never priced, not allowlisted), or on one the user already
+                            hid or un-hid, so that choice can be undone. Real coins have none. */}
+                        {h.contract_or_mint && (h.unknown_token || h.hidden || h.visibility_override != null) && (
+                          <TokenVisibilityMenu
+                            symbol={h.symbol}
+                            chain={h.chain}
+                            actionLabel={h.hidden ? (h.hidden_reason === "user_hidden" ? "Show" : "Not spam") : "Hide"}
+                            showing={Boolean(h.hidden)}
                             disabled={savingToken === (h.token_key ?? h.contract_or_mint)}
-                            onClick={() => void changeVisibility(h)}
-                            aria-label={`${h.hidden ? "Show" : "Hide"} ${h.symbol} on ${h.chain}`}
-                          >
-                            {h.hidden ? (h.hidden_reason === "user_hidden" ? "Show" : "Not spam") : "Hide"}
-                          </button>
+                            onSelect={() => void changeVisibility(h)}
+                          />
                         )}
                       </span>
                       <span className="listRowMeta">
@@ -327,5 +330,62 @@ export default function CryptoHoldings() {
         </RefreshingRegion>
       )}
     </PageShell>
+  );
+}
+
+/** A token row's ⋯ menu (#474, V13): one action, "Hide" / "Not spam" / "Show" (#342). A
+ *  <details> so it opens with Enter or Space; Escape or a tap outside closes it. */
+function TokenVisibilityMenu({ symbol, chain, actionLabel, showing, disabled, onSelect }: {
+  symbol: string;
+  chain: string;
+  actionLabel: string;
+  /** The action shows the token (it is hidden now). */
+  showing: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  const menuRef = useRef<HTMLDetailsElement | null>(null);
+  const summaryRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const onPointer = (event: PointerEvent) => {
+      const menu = menuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, []);
+  const close = () => {
+    if (menuRef.current) menuRef.current.open = false;
+  };
+  return (
+    <details
+      className="inboxRefreshMenu cryptoTokenMenu"
+      ref={menuRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && menuRef.current?.open) {
+          event.stopPropagation();
+          close();
+          summaryRef.current?.focus();
+        }
+      }}
+    >
+      <summary ref={summaryRef} className="btn btnSmall inboxRefreshMenuToggle" aria-label={`More for ${symbol} on ${chain}`}>
+        <span aria-hidden="true">⋯</span>
+      </summary>
+      <div className="inboxRefreshMenuPanel" role="group" aria-label={`Options for ${symbol} on ${chain}`}>
+        <button
+          type="button"
+          className="inboxRefreshMenuItem"
+          disabled={disabled}
+          aria-label={`${showing ? "Show" : "Hide"} ${symbol} on ${chain}`}
+          onClick={() => {
+            close();
+            onSelect();
+          }}
+        >
+          {actionLabel}
+        </button>
+      </div>
+    </details>
   );
 }

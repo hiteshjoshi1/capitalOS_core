@@ -3,6 +3,7 @@ import type { CashFlowTrendPoint, CashFlowYearOverYear } from "../lib/api";
 import * as fmt from "../lib/format";
 import { DeltaArrow } from "./Delta";
 import TrendBarChart from "./TrendBarChart";
+import FoldSection from "./FoldSection";
 import { averageSavingsRate, savingsRateLabel, savingsRatePoints, yearAgoLabel, yearOverYearMovers } from "../lib/yearOverYear";
 import "./CashFlowYearOverYear.css";
 
@@ -64,22 +65,33 @@ export function YearOverYearSection({ yoy, formatMoney }: { yoy: CashFlowYearOve
 }
 
 /** The savings rate for the twelve months ending at the month (Overview tab). */
-export function SavingsRateTrend({ trend, month }: { trend: CashFlowTrendPoint[] | undefined; month: string }) {
+export function SavingsRateTrend({ trend, month, fold = false }: {
+  trend: CashFlowTrendPoint[] | undefined;
+  month: string;
+  /** #474 (V21): fold under its heading (a phone); it starts open. */
+  fold?: boolean;
+}) {
   const points = savingsRatePoints(trend);
   if (points.length === 0 || points.every((p) => p.percent == null)) return null;
   const average = averageSavingsRate(trend);
   return (
-    <section aria-label="Savings rate trend">
-      <div className="cashFlowSectionHeading cfYoyHeading">
-        <div>
-          <p className="wealthEyebrow">History</p>
-          <h2 className="cashFlowSectionTitle">Savings rate, twelve months</h2>
+    <FoldSection
+      fold={fold}
+      defaultOpen
+      ariaLabel="Savings rate trend"
+      heading={
+        <div className="cashFlowSectionHeading cfYoyHeading">
+          <div>
+            <p className="wealthEyebrow">History</p>
+            <h2 className="cashFlowSectionTitle">Savings rate, twelve months</h2>
+          </div>
+          <span className="muted">
+            {`Ending ${fmt.formatMonth(month)}`}
+            {average != null ? ` · ${fmt.formatPercent(average, { scale: "points" })} of income saved overall` : ""}
+          </span>
         </div>
-        <span className="muted">
-          {`Ending ${fmt.formatMonth(month)}`}
-          {average != null ? ` · ${fmt.formatPercent(average, { scale: "points" })} of income saved overall` : ""}
-        </span>
-      </div>
+      }
+    >
       <div className="card">
         <TrendBarChart
           ariaLabel="Savings rate by month"
@@ -91,6 +103,6 @@ export function SavingsRateTrend({ trend, month }: { trend: CashFlowTrendPoint[]
           }))}
         />
       </div>
-    </section>
+    </FoldSection>
   );
 }

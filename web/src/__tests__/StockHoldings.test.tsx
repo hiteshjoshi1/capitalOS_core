@@ -19,6 +19,14 @@ vi.mock("../lib/api", () => ({
 }));
 
 const mockApi = vi.mocked(api, true);
+
+/** #474 (V4): on a phone each holding is a one-line row; open them all to see the details. */
+async function openPhoneRows() {
+  await screen.findByText("Top Holdings");
+  for (const row of document.querySelectorAll<HTMLButtonElement>('button.stockCompactRow[aria-expanded="false"]')) {
+    fireEvent.click(row);
+  }
+}
 const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns.v2";
 
 const summaryFixture: StockHoldingsSummary = {
@@ -236,10 +244,18 @@ describe("StockHoldings", () => {
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Shares" })).not.toBeInTheDocument();
+    // #474 (V4): one line per holding (ticker, name, value, P&L %), closed until tapped.
+    const row = screen.getByRole("button", { name: "700 Tencent Holdings: S$ 120,000, profit and loss +21.6%" });
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector(".stockHoldingsMobileDetails")).toBeNull();
+    fireEvent.click(row);
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    await openPhoneRows();
 
-    const hkCard = screen.getByText("Tencent Holdings").closest(".stockHoldingsMobileCard");
+    const hkCard = row.closest(".stockHoldingsMobileCard")?.querySelector(".stockHoldingsMobileDetails");
     expect(hkCard).not.toBeNull();
     if (hkCard) {
+      expect(row).toHaveAttribute("aria-controls", hkCard.id);
       const scoped = within(hkCard as HTMLElement);
       expect(scoped.getByText("Tencent Holdings")).toBeInTheDocument();
       expect(scoped.getByText("HKEX")).toBeInTheDocument();
@@ -308,6 +324,7 @@ describe("StockHoldings", () => {
       </ThemeProvider>,
     );
 
+    if (width < 900) await openPhoneRows();
     const stale = await screen.findByText("stale (price from 15 Jan 2026, SHAREKHAN statement)");
     expect(stale).toHaveClass("priceAge--stale");
     // A fresh quote is dated and sourced, but not marked.
@@ -372,6 +389,7 @@ describe("StockHoldings", () => {
       </ThemeProvider>,
     );
 
+    if (width < 900) await openPhoneRows();
     expect(await screen.findByText("price from 15 Jan 2026, SHAREKHAN statement")).not.toHaveClass("priceAge--stale");
     expect(screen.queryByTestId("stock-price-freshness")).not.toBeInTheDocument();
     expect(screen.queryByText(/without a live price/)).not.toBeInTheDocument();
@@ -455,6 +473,7 @@ describe("StockHoldings", () => {
       </ThemeProvider>,
     );
 
+    if (width < 900) await openPhoneRows();
     const info = await screen.findByRole("button", { name: "Why is 700's price stale?" });
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
     fireEvent.click(info);
@@ -575,15 +594,16 @@ describe("StockHoldings", () => {
 
   it("shows the change and its price / quantity / FX split on the mobile card (#251)", async () => {
     await renderChange(375);
-    const hkCard = within(screen.getByText("Tencent Holdings").closest(".stockHoldingsMobileCard") as HTMLElement);
+    await openPhoneRows();
+    const hkCard = within(screen.getByText("Tencent Holdings", { selector: ".stockHoldingsMobileTitle" }).closest(".stockHoldingsMobileCard") as HTMLElement);
     expect(hkCard.getByText("Since 28 Feb 2026")).toBeInTheDocument();
     expect(hkCard.getByText("+S$ 3,000 (+2.6%)")).toBeInTheDocument();
     expect(hkCard.getByText("Price +S$ 3,400")).toBeInTheDocument();
     expect(hkCard.getByText("Quantity S$ 0")).toBeInTheDocument();
     expect(hkCard.getByText("FX -S$ 400.00")).toBeInTheDocument();
 
-    const soldCard = within(screen.getByText("Apple").closest(".stockHoldingsMobileCard") as HTMLElement);
-    expect(soldCard.getByText("Sold")).toBeInTheDocument();
+    const soldCard = within(screen.getByText("Apple", { selector: ".stockHoldingsMobileTitle" }).closest(".stockHoldingsMobileCard") as HTMLElement);
+    expect(soldCard.getAllByText("Sold").length).toBeGreaterThan(0);
     expect(soldCard.getByText("Quantity -S$ 5,000")).toBeInTheDocument();
     expect(soldCard.queryByText(/NW$/)).not.toBeInTheDocument();
   });
@@ -780,6 +800,68 @@ describe("StockHoldings", () => {
 
     await screen.findByText("Tencent Holdings", undefined, { timeout: 2000 }).catch(() => screen.findByText("700"));
     expect(mockApi.dividendsByCompany).not.toHaveBeenCalled();
+  });
+
+  // ── #474 (V4): phone layout: jump to positions, search, one-line rows ──────
+  it("filters the holdings by name or ticker, on the table and on a phone (#474, V4)", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    renderPage();
+    const search = await screen.findByRole("searchbox", { name: "Search holdings by name or ticker" });
+    expect(tableSymbols()).toEqual(["700", "INFY", "USD"]);
+
+    fireEvent.change(search, { target: { value: "infos" } });
+    expect(tableSymbols()).toEqual(["INFY"]);
+    expect(screen.getByText("1 of 3 positions match")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "70" } });
+    expect(tableSymbols()).toEqual(["700"]);
+    fireEvent.change(search, { target: { value: "zzz" } });
+    expect(tableSymbols()).toEqual([]);
+    expect(screen.getByText('No holdings match "zzz".')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "" } });
+    expect(tableSymbols()).toEqual(["700", "INFY", "USD"]);
+  });
+
+  it("on a phone: a Positions jump link and one-line rows that search filters (#474, V4)", async () => {
+    Object.defineProperty(window, "innerWidth", { value: 375, configurable: true, writable: true });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    renderPage();
+    const jump = await screen.findByRole("link", { name: /Positions \(3\)/ });
+    expect(jump).toHaveAttribute("href", "#stock-positions");
+    fireEvent.click(jump);
+    expect(screen.getByRole("heading", { name: "Top Holdings" })).toHaveFocus();
+    expect(document.getElementById("stock-positions")).toHaveAttribute("aria-label", "Top holdings");
+
+    const rows = () => Array.from(document.querySelectorAll(".stockCompactSymbol")).map((el) => el.textContent);
+    expect(rows()).toEqual(["700", "INFY", "USD"]);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search holdings by name or ticker" }), { target: { value: "TENCENT" } });
+    expect(rows()).toEqual(["700"]);
+  });
+
+  it("shows no jump link on a wide screen (#474)", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    renderPage();
+    await screen.findByText("Top Holdings");
+    expect(screen.queryByRole("link", { name: /Positions \(/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the change on a phone row when sorted by change, uncoloured for a purchase (#474, #251)", async () => {
+    await renderChange(375);
+    fireEvent.change(screen.getByLabelText("Sort holdings by"), { target: { value: "change" } });
+    const infy = screen.getByRole("button", { name: /^INFY Infosys: .*change since 28 Feb 2026 \+30\.0%, stale price$/ });
+    expect(infy.querySelector(".stockCompactMetric")).not.toHaveClass("good");
+    const tencent = screen.getByRole("button", { name: /^700 Tencent Holdings: .*change since 28 Feb 2026 \+2\.6%$/ });
+    expect(tencent.querySelector(".stockCompactMetric")).toHaveClass("good");
+    const apple = screen.getByRole("button", { name: /^AAPL Apple: S\$ 0, sold since 28 Feb 2026$/ });
+    expect(apple).toHaveTextContent("Sold");
+  });
+
+  it("flags a stale price on the closed phone row (#474, #418)", async () => {
+    Object.defineProperty(window, "innerWidth", { value: 375, configurable: true, writable: true });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
+    renderPage();
+    const reliance = await screen.findByRole("button", { name: /^RELIANCE Reliance Industries: .*, stale price$/ });
+    expect(reliance).toHaveAttribute("aria-expanded", "false");
+    expect(within(reliance).getByText("stale")).toHaveClass("priceAge--stale");
   });
 });
 
