@@ -29,7 +29,11 @@ export default function DividendCalendarCard({ baseCurrency }: { baseCurrency: s
       <div className="coSectionHeader">
         <div>
           <p className="coEyebrow">AHEAD</p>
-          <h2 className="coSectionTitle" id="dividend-calendar-heading">Dividends, next 3 months</h2>
+          {/* #475 (V15): today + 3 months touches 3 or 4 calendar months, so the heading names
+              the actual span ("12 Nov – 11 Feb"), which the month tiles then match. */}
+          <h2 className="coSectionTitle" id="dividend-calendar-heading">
+            {cal ? `Dividends expected, ${fmt.formatDayMonth(cal.from_date)} – ${fmt.formatDayMonth(cal.to_date)}` : "Dividends ahead"}
+          </h2>
         </div>
         {cal ? <div className="muted stockHoldingsMeta">Expected {fmt.formatMoney(cal.total_base, currency)} gross</div> : null}
       </div>

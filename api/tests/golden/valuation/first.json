@@ -695,6 +695,46 @@
         }
       ],
       "as_of_month": "2026-03",
+      "bank_broker": {
+        "currency_breakdown": [
+          {
+            "currency": "SGD",
+            "current_value": 47400.0,
+            "delta_abs": -600.0001,
+            "delta_pct": -0.0125,
+            "snapshot_value": 48000.0
+          },
+          {
+            "currency": "USD",
+            "current_value": 13007.8341,
+            "delta_abs": 6.9753,
+            "delta_pct": 0.0005,
+            "snapshot_value": 13000.8588
+          }
+        ],
+        "delta_abs": -593.0248,
+        "delta_pct": -0.0097,
+        "items": [
+          {
+            "percent": 76.31,
+            "source": "DBS",
+            "value": 46100.0
+          },
+          {
+            "percent": 17.98,
+            "source": "HSBC",
+            "value": 10862.212
+          },
+          {
+            "percent": 5.7,
+            "source": "IBKR",
+            "value": 3445.6221
+          }
+        ],
+        "snapshot_missing": false,
+        "snapshot_total": 61000.8589,
+        "total": 60407.8341
+      },
       "base_currency": "SGD",
       "compare_month": "2026-02",
       "currency_breakdown": [
@@ -767,31 +807,37 @@
       "total": 62218.2027,
       "trend": [
         {
+          "bank_broker_value": null,
           "is_live": false,
           "month": "2025-10",
           "value": null
         },
         {
+          "bank_broker_value": null,
           "is_live": false,
           "month": "2025-11",
           "value": null
         },
         {
+          "bank_broker_value": 44032.1101,
           "is_live": false,
           "month": "2025-12",
           "value": 44032.1101
         },
         {
+          "bank_broker_value": 56706.9641,
           "is_live": false,
           "month": "2026-01",
           "value": 58711.5095
         },
         {
+          "bank_broker_value": 61000.8589,
           "is_live": false,
           "month": "2026-02",
           "value": 63682.8865
         },
         {
+          "bank_broker_value": 60407.8341,
           "is_live": false,
           "month": "2026-03",
           "value": 62218.2027
@@ -873,6 +919,46 @@
         }
       ],
       "as_of_month": "2026-04",
+      "bank_broker": {
+        "currency_breakdown": [
+          {
+            "currency": "SGD",
+            "current_value": 47400.0,
+            "delta_abs": 0.0,
+            "delta_pct": 0.0,
+            "snapshot_value": 47400.0
+          },
+          {
+            "currency": "USD",
+            "current_value": 13007.8341,
+            "delta_abs": 0.0,
+            "delta_pct": 0.0,
+            "snapshot_value": 13007.8341
+          }
+        ],
+        "delta_abs": 0.0,
+        "delta_pct": 0.0,
+        "items": [
+          {
+            "percent": 76.31,
+            "source": "DBS",
+            "value": 46100.0
+          },
+          {
+            "percent": 17.98,
+            "source": "HSBC",
+            "value": 10862.212
+          },
+          {
+            "percent": 5.7,
+            "source": "IBKR",
+            "value": 3445.6221
+          }
+        ],
+        "snapshot_missing": false,
+        "snapshot_total": 60407.8341,
+        "total": 60407.8341
+      },
       "base_currency": "SGD",
       "compare_month": "2026-03",
       "currency_breakdown": [
@@ -945,31 +1031,37 @@
       "total": 62218.2027,
       "trend": [
         {
+          "bank_broker_value": null,
           "is_live": false,
           "month": "2025-11",
           "value": null
         },
         {
+          "bank_broker_value": 44032.1101,
           "is_live": false,
           "month": "2025-12",
           "value": 44032.1101
         },
         {
+          "bank_broker_value": 56706.9641,
           "is_live": false,
           "month": "2026-01",
           "value": 58711.5095
         },
         {
+          "bank_broker_value": 61000.8589,
           "is_live": false,
           "month": "2026-02",
           "value": 63682.8865
         },
         {
+          "bank_broker_value": 60407.8341,
           "is_live": false,
           "month": "2026-03",
           "value": 62218.2027
         },
         {
+          "bank_broker_value": 60407.8341,
           "is_live": true,
           "month": "2026-04",
           "value": 62218.2027

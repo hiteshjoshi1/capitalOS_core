@@ -32,7 +32,7 @@ describe("RiskThresholdsCard (#253)", () => {
     expect(topN).toHaveValue(null);
     expect(topN).toHaveAttribute("placeholder", "50");
     expect(screen.getByLabelText("One platform (%)")).toHaveAttribute("placeholder", "50");
-    expect(screen.getByText(/One holding's share of net worth\. Default 15%\./)).toBeInTheDocument();
+    expect(screen.getByText(/One holding's share of net worth\. The Inbox alerts you above it too\. Default 15%\./)).toBeInTheDocument();
   });
 
   it("saves the thresholds (blank = default) and shares them with the Risk page", async () => {

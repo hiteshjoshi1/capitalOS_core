@@ -130,6 +130,8 @@ def test_a_big_move_with_no_data_cause_says_so():
              end_holdings=[_h("AAA", 112_000, qty=100)])
     assert r["is_big_move"] and _keys(r) == []
     assert r["none_reason"] == NONE_REASON
+    # #475 (V6): reads as the market's move, not as an error.
+    assert NONE_REASON == "Mostly market moves; no new statement or account explains it."
     # A small move with no cause says nothing.
     small = _run(100_000, 101_000, start_accounts={}, end_accounts={})
     assert not small["is_big_move"] and small["none_reason"] is None

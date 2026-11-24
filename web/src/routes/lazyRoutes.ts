@@ -13,7 +13,6 @@ export const CashOverview = lazy(() => import("./CashOverview.tsx"));
 export const MarketData = lazy(() => import("./MarketData.tsx"));
 export const CashFlowDetail = lazy(() => import("./CashFlowDetail.tsx"));
 export const CashFlowMapping = lazy(() => import("./CashFlowMapping.tsx"));
-export const Alerts = lazy(() => import("./Alerts.tsx"));
 export const WealthHistory = lazy(() => import("./WealthHistory.tsx"));
 export const WealthRisk = lazy(() => import("./WealthRisk.tsx"));
 export const Dividends = lazy(() => import("./Dividends.tsx"));

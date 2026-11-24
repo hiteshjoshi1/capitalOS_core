@@ -62,10 +62,6 @@ export default function Dividends() {
 
   const shownCurrency = monthSummary?.base_currency || baseCurrency;
   const formatMoney = useCallback((value?: number | null) => fmt.formatMoney(value, shownCurrency), [shownCurrency]);
-  const formatCompactMoney = useCallback(
-    (value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency),
-    [shownCurrency],
-  );
   const formatNumber = (value?: number) => fmt.formatNumber(value, 4);
 
   const topCompanies: DividendCompanyItem[] = (companySummary?.items ?? []).slice(0, 20);
@@ -123,16 +119,6 @@ export default function Dividends() {
       ? (expectedYear.payout_minus_tax - realizedTrailing12.payout_minus_tax) / Math.abs(realizedTrailing12.payout_minus_tax)
       : null;
 
-  const trendPoints = useMemo(
-    () =>
-      realizedBuckets.map((bucket) => ({
-        month: bucket.bucket,
-        value: bucket.payout_minus_tax,
-        displayValue: formatCompactMoney(bucket.payout_minus_tax),
-        tone: "neutral" as const,
-      })),
-    [realizedBuckets, formatCompactMoney],
-  );
   const incomeCurrency = income?.base_currency || shownCurrency;
   const incomePoints = useMemo(
     () =>
@@ -161,7 +147,7 @@ export default function Dividends() {
         <LoadError title="Couldn't load dividends" error={monthRes.error.message} onRetry={() => void monthRes.reload().catch(() => undefined)} />
       )}
       {incomeRes.error && (
-        <LoadError title="Couldn't load income totals" error={incomeRes.error.message} onRetry={() => void incomeRes.reload().catch(() => undefined)} />
+        <LoadError title="Couldn't load dividends & interest totals" error={incomeRes.error.message} onRetry={() => void incomeRes.reload().catch(() => undefined)} />
       )}
 
       {monthSummary && (
@@ -171,16 +157,16 @@ export default function Dividends() {
         >
           {income ? (
             <section className="incomeHeadline" aria-labelledby="income-headline-heading">
-              <h2 className="srOnly" id="income-headline-heading">Income compared with a year earlier</h2>
+              <h2 className="srOnly" id="income-headline-heading">Dividends &amp; interest compared with a year earlier</h2>
               <HeroMetricCard
-                eyebrow="INCOME · LAST 12 MONTHS"
+                eyebrow="DIVIDENDS & INTEREST · LAST 12 MONTHS"
                 value={fmt.formatMoney(income.trailing_12.total, incomeCurrency)}
                 delta={{
                   abs: income.trailing_12.total - income.prior_12.total,
                   pct: income.trailing_12_change_pct,
                   currency: incomeCurrency,
                   baseline: "vs the 12 months before",
-                  missingReason: income.trailing_12_change_pct == null ? "no income in the 12 months before" : null,
+                  missingReason: income.trailing_12_change_pct == null ? "no dividends or interest in the 12 months before" : null,
                 }}
                 insightText={`${splitText(income.trailing_12)} · ${windowLabel(income.trailing_12)}`}
                 deltaRow={[
@@ -205,16 +191,16 @@ export default function Dividends() {
                 ]}
               />
               <div className="card dividendHistoryCard">
-                <p className="dividendSignalLabel">Dividends + interest by month</p>
+                <p className="dividendSignalLabel">Dividends &amp; interest by month</p>
                 {incomePoints.every((p) => p.value === 0) ? (
                   <div className="muted">No dividends or interest in these 12 months.</div>
                 ) : (
-                  <TrendBarChart points={incomePoints} ariaLabel="Monthly income, dividends plus interest" />
+                  <TrendBarChart points={incomePoints} ariaLabel="Dividends and interest by month" />
                 )}
               </div>
             </section>
           ) : incomeRes.isLoading ? (
-            <div className="card" role="status">Loading income…</div>
+            <div className="card" role="status">Loading dividends &amp; interest…</div>
           ) : null}
 
           <HeroMetricCard
@@ -263,23 +249,6 @@ export default function Dividends() {
           </section>
 
           <DividendCalendarCard baseCurrency={shownCurrency} />
-
-          <section className="dividendHistorySection" aria-labelledby="dividend-history-heading">
-            <div className="coSectionHeader">
-              <div>
-                <p className="coEyebrow">HISTORY</p>
-                <h2 className="coSectionTitle" id="dividend-history-heading">12-month dividend income</h2>
-              </div>
-              <div className="muted stockHoldingsMeta">Trailing total {formatMoney(realizedTrailing12.payout_minus_tax)}</div>
-            </div>
-            <div className="card dividendHistoryCard">
-              {trendPoints.length === 0 ? (
-                <div className="muted">No dividends in selected range.</div>
-              ) : (
-                <TrendBarChart points={trendPoints} ariaLabel="12-month dividend income" />
-              )}
-            </div>
-          </section>
 
           <section aria-labelledby="dividend-companies-heading">
             <div className="coSectionHeader">

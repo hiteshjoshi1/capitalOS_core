@@ -78,7 +78,7 @@ export const APP_SECTIONS: AppSection[] = [
   },
 ];
 
-// #317: Alerts moved to the header bell (the Data Hub inbox); /alerts still works.
+// #317: Alerts moved to the header bell (the Data Hub inbox); #475: /alerts redirects to the Inbox.
 export const UTILITY_NAV_ITEMS: UtilityNavItem[] = [];
 
 function itemMatchScore(item: NavItem, pathname: string): number {

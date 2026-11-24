@@ -406,6 +406,52 @@ describe("CashFlowDetail route", () => {
     expect(screen.queryByText("Income transactions (1)")).not.toBeInTheDocument();
   });
 
+  it("folds the four overview blocks on a phone: net and savings rate open, the rest closed (#474, V21)", async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(max-width: 980px)",
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      mockApi.cashFlowDetail.mockResolvedValue({
+        ...detailFixture,
+        analytics: {
+          ...detailFixture.analytics,
+          savings_rate_trend: [
+            { month: "2026-01", inflows: 1000, outflows: 600, net: 400, savings_rate: 0.4, burn_rate: null },
+            { month: "2026-02", inflows: 1000, outflows: 800, net: 200, savings_rate: 0.2, burn_rate: null },
+          ],
+        },
+      });
+      renderRoute("/cash-flow");
+
+      const fold = async (name: string) =>
+        (await screen.findByRole("heading", { name })).closest("details") as HTMLDetailsElement;
+      const titles = ["Six-month net cash flow", "Savings rate, twelve months", "Vs. last month", "How your cash balance moved"];
+      const folds = await Promise.all(titles.map(fold));
+      expect(folds.map((d) => d?.open)).toEqual([true, true, false, false]);
+      // Net and savings rate come first, in page order.
+      const order = folds.map((d) => Array.from(document.querySelectorAll("details.foldSection")).indexOf(d));
+      expect(order).toEqual([0, 1, 2, 3]);
+      // Each heading is its fold's toggle.
+      expect(screen.getByRole("heading", { name: "Vs. last month" }).closest("summary")).not.toBeNull();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("keeps the overview blocks unfolded on a wide screen (#474)", async () => {
+    renderRoute("/cash-flow");
+    expect(await screen.findByRole("heading", { name: "Vs. last month" })).toBeInTheDocument();
+    expect(document.querySelector("details.foldSection")).toBeNull();
+  });
+
   it("labels the open month as month to date and compares it with the same days last month (#243)", async () => {
     mockApi.cashFlowDetail.mockResolvedValue(monthToDateFixture);
     renderRoute("/cash-flow");
@@ -492,6 +538,8 @@ describe("CashFlowDetail route", () => {
 
     expect(screen.getByRole("heading", { name: "How predictable is your spend" })).toBeInTheDocument();
     expect(screen.getByText("Recurring vs. non-recurring")).toBeInTheDocument();
+    // #473 (V20): the card says how recurring is decided.
+    expect(screen.getByText(/Recurring: about the same amount once a month for 3\+ months/)).toBeInTheDocument();
     expect(screen.getByText("Fixed vs. variable")).toBeInTheDocument();
 
     expect(screen.getByLabelText("Top merchants chart")).toBeInTheDocument();

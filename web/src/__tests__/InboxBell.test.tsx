@@ -1,9 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
-import Alerts from "../routes/Alerts";
 import InboxBell from "../components/InboxBell";
+import RedirectKeepingSearch from "../components/RedirectKeepingSearch";
 import { api } from "../lib/api";
 import type { InboxResponse } from "../lib/api";
 import { clearApiCache } from "../lib/useApiResource";
@@ -35,67 +35,71 @@ const inbox: InboxResponse = {
   recent_activity: [],
 };
 
-function renderWithBell(narrow = false) {
+function renderBell(narrow = false) {
   return render(
     <MemoryRouter>
       <InboxBell narrow={narrow} />
-      <Alerts />
     </MemoryRouter>,
   );
 }
 
-describe("Alerts and the header bell read one list (#317)", () => {
+function Where() {
+  const { pathname, search } = useLocation();
+  return <div data-testid="where">{`${pathname}${search}`}</div>;
+}
+
+describe("the header bell reads the Data Hub inbox (#317)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearApiCache();
   });
 
-  it("bell count = inbox count = the Alerts list, from one request", async () => {
+  it("bell count = inbox count = the bell's list, from one request", async () => {
     mockApi.operationsInbox.mockResolvedValue(inbox);
-    renderWithBell();
-    const list = await screen.findByRole("list", { name: "Alerts" });
-    const alerts = within(list).getAllByTestId("alert-item");
+    renderBell();
+    const panel = await screen.findByRole("group", { name: "Needs you" });
+    await within(panel).findByText("Quote refresh is failing");
     expect(screen.getByTestId("inbox-bell-count")).toHaveTextContent(String(inbox.count));
-    expect(alerts).toHaveLength(inbox.count);
+    expect(within(panel).getAllByRole("listitem")).toHaveLength(inbox.count);
     expect(screen.getByLabelText("3 items need you")).toBeInTheDocument();
     expect(mockApi.operationsInbox).toHaveBeenCalledTimes(1);
   });
 
-  it("each alert links to its fix; a refresh opens the Data Hub", async () => {
+  it("each item links to its fix; a refresh opens the Data Hub", async () => {
     mockApi.operationsInbox.mockResolvedValue(inbox);
-    renderWithBell();
-    const list = await screen.findByRole("list", { name: "Alerts" });
-    expect(within(list).getByRole("link", { name: "Fix format" })).toHaveAttribute("href", "/ingest?job=4");
-    expect(within(list).getByRole("link", { name: "Map transactions" })).toHaveAttribute("href", "/cash-flow/map-transactions");
-    expect(within(list).getByRole("link", { name: "Open the Data Hub" })).toHaveAttribute("href", "/operations");
+    renderBell();
+    const panel = await screen.findByRole("group", { name: "Needs you" });
+    expect(await within(panel).findByRole("link", { name: /Synthetic Bank: file format not recognised/ })).toHaveAttribute("href", "/ingest?job=4");
+    expect(within(panel).getByRole("link", { name: /5 transactions without a category/ })).toHaveAttribute("href", "/cash-flow/map-transactions");
+    expect(within(panel).getByRole("link", { name: /Quote refresh is failing/ })).toHaveAttribute("href", "/operations");
   });
 
-  it("nothing open: no count on the bell, and Alerts says so", async () => {
+  it("nothing open: no count on the bell, and it says so", async () => {
     mockApi.operationsInbox.mockResolvedValue({ ...inbox, count: 0, items: [] });
-    renderWithBell();
-    expect(await screen.findByText(/Nothing needs you. Everything is up to date./)).toBeInTheDocument();
+    renderBell();
+    expect(await screen.findByText(/Nothing needs you\./)).toBeInTheDocument();
     expect(screen.queryByTestId("inbox-bell-count")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Nothing needs you")).toBeInTheDocument();
   });
 
   it("on a phone the bell is a link to the Data Hub with the same count", async () => {
     mockApi.operationsInbox.mockResolvedValue(inbox);
-    render(
-      <MemoryRouter>
-        <InboxBell narrow />
-      </MemoryRouter>,
-    );
+    renderBell(true);
     const link = await screen.findByRole("link", { name: "3 items need you" });
     expect(link).toHaveAttribute("href", "/operations");
   });
+});
 
-  it("shows a load error", async () => {
-    mockApi.operationsInbox.mockRejectedValue(new Error("Network error"));
+describe("/alerts (#475, V3)", () => {
+  it("opens the Data Hub Inbox, keeping the query string: the Alerts page is gone", () => {
     render(
-      <MemoryRouter>
-        <Alerts />
+      <MemoryRouter initialEntries={["/alerts?month=2026-11"]}>
+        <Routes>
+          <Route path="/alerts" element={<RedirectKeepingSearch to="/operations" />} />
+          <Route path="/operations" element={<Where />} />
+        </Routes>
       </MemoryRouter>,
     );
-    expect(await screen.findByText(/Couldn't load alerts/)).toBeInTheDocument();
+    expect(screen.getByTestId("where")).toHaveTextContent("/operations?month=2026-11");
   });
 });

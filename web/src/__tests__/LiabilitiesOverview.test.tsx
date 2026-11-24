@@ -5,6 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 
 import LiabilitiesOverview from "../routes/LiabilitiesOverview";
 import { api } from "../lib/api";
+import { currentMonthYYYYMM } from "../lib/selectedMonth";
+import { formatMonth } from "../lib/format";
 import type { Account, CreditCardAnalytics, CreditCardTransaction } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
@@ -242,12 +244,59 @@ describe("LiabilitiesOverview route", () => {
   });
 
   it("shows upcoming payments by due date only, with no dollar estimate", async () => {
-    mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
+    mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics({ month: currentMonthYYYYMM() }));
     renderPage();
 
     const upcomingSection = (await screen.findByText("Upcoming payments")).closest("section") as HTMLElement;
     expect(within(upcomingSection).getByText("Amex Platinum")).toBeInTheDocument();
     expect(within(upcomingSection).getByText("DBS Credit Card")).toBeInTheDocument();
+  });
+
+  it("gives a status only for a printed or typed-in due date; a configured due day is unknown (#472)", async () => {
+    const month = currentMonthYYYYMM();
+    const base = makeAnalytics({ month });
+    const inTenDays = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    mockApi.creditCardAnalytics.mockResolvedValue(
+      makeAnalytics({
+        month,
+        cards: [
+          { ...base.cards[0], due_date: `${month}-15`, due_source: "configured", due_status: null },
+          { ...base.cards[1], due_date: inTenDays, due_source: "manual", due_status: "upcoming" },
+        ],
+      }),
+    );
+    renderPage();
+
+    const upcomingSection = (await screen.findByText("Upcoming payments")).closest("section") as HTMLElement;
+    const rows = upcomingSection.querySelectorAll(".liabDueRow");
+    // The known due sorts first; the configured one says unknown, with no date or "Overdue".
+    expect(rows[0]).toHaveTextContent("DBS Credit Card");
+    expect(rows[0]).toHaveTextContent(/Due in 10d · /);
+    expect(rows[1]).toHaveTextContent("Amex Platinum");
+    expect(within(rows[1] as HTMLElement).getByText("Due date unknown")).toBeInTheDocument();
+    expect(upcomingSection).not.toHaveTextContent(/Overdue/);
+  });
+
+  it("shows no balances or payment status on another month than the current one (#472)", async () => {
+    const month = currentMonthYYYYMM();
+    // The page follows the month picked; a past one here.
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-07");
+    mockApi.creditCardAnalytics.mockImplementation(async (m) =>
+      makeAnalytics({ month: m, cards: makeAnalytics().cards.map((c) => ({ ...c, due_source: "manual" as const })) }),
+    );
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "Balances and payments" })).toBeInTheDocument();
+    expect(screen.queryByText("Upcoming payments")).not.toBeInTheDocument();
+    expect(screen.queryByText("Card balances")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument();
+    expect(mockApi.creditCardBalances).not.toHaveBeenCalled();
+
+    // One tap back to the current month shows them.
+    fireEvent.click(screen.getByRole("button", { name: `Show ${formatMonth(month)}` }));
+    expect(await screen.findByText("Upcoming payments")).toBeInTheDocument();
+    expect(mockApi.creditCardAnalytics).toHaveBeenLastCalledWith(month, "SGD", 12, null);
+    window.localStorage.removeItem("capitalos.selectedMonth");
   });
 
   it("shows a no-loans banner when no LOAN accounts are linked", async () => {
@@ -261,7 +310,7 @@ describe("LiabilitiesOverview route", () => {
   });
 
   it("shows a Loans section when a LOAN account is linked", async () => {
-    mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
+    mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics({ month: currentMonthYYYYMM() }));
     mockApi.accounts.mockResolvedValue([
       ...noLoans,
       { id: 20, name: "Home Loan", platform: "OCBC", account_type: "LOAN", currency: "SGD" },

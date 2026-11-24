@@ -334,3 +334,30 @@
     text-align: right;
   }
 }
+
+/* #472 (V18 of #432): another month than the current one shows no balances or payment status. */
+.liabLiveOnly {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.liabLiveOnlyText {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.liabLiveOnlyTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.liabLiveOnlyText p {
+  margin: 0;
+  font-size: 13px;
+}

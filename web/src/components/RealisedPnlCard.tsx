@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import * as fmt from "../lib/format";
 import { formatPlatformLabel } from "../lib/platformLabels";
+import { noSalesLine } from "../lib/realisedPnl";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import { DeltaArrow } from "./Delta";
 import "./RealisedPnlCard.css";
@@ -225,6 +226,10 @@ export default function RealisedPnlCard({ month, baseCurrency }: { month: string
     if (next !== "year") setYear(null);
   };
   const stockCount = rows.length;
+  // #475 (V11): nothing sold this year (so nothing this month): one line, not three "No sales"
+  // boxes. The period picker stays only when another year had sales to look at.
+  const nothingSold = choice === "month" && !ytd.sales && !m.sales;
+  const showPicker = !nothingSold || years.length > 0;
 
   const options: { value: Choice; label: string }[] = [
     { value: "month", label: monthLabel },
@@ -240,76 +245,84 @@ export default function RealisedPnlCard({ month, baseCurrency }: { month: string
             <h2 className="cardTitle">Realised P&amp;L</h2>
             <span className="muted realisedHint">Sales vs what you paid</span>
           </div>
-          <div className="realisedPicker">
-            <div className="coSegmentedControl" role="group" aria-label="Realised P&L period">
-              {options.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`coSegmentedBtn${choice === option.value ? " coSegmentedBtnActive" : ""}`}
-                  aria-pressed={choice === option.value}
-                  onClick={() => choose(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <label className="realisedYear">
-              <span className="srOnly">Year</span>
-              <select
-                className="input realisedYearSelect"
-                aria-label="Year"
-                value={choice === "year" && year != null ? String(year) : ""}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  if (value) {
-                    setYear(value);
-                    setChoice("year");
-                  } else {
-                    choose("month");
-                  }
-                }}
-              >
-                <option value="">Year…</option>
-                {years.map((y) => (
-                  <option key={y} value={y}>{y}</option>
+          {showPicker ? (
+            <div className="realisedPicker">
+              <div className="coSegmentedControl" role="group" aria-label="Realised P&L period">
+                {options.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`coSegmentedBtn${choice === option.value ? " coSegmentedBtnActive" : ""}`}
+                    aria-pressed={choice === option.value}
+                    onClick={() => choose(option.value)}
+                  >
+                    {option.label}
+                  </button>
                 ))}
-              </select>
-            </label>
-          </div>
+              </div>
+              <label className="realisedYear">
+                <span className="srOnly">Year</span>
+                <select
+                  className="input realisedYearSelect"
+                  aria-label="Year"
+                  value={choice === "year" && year != null ? String(year) : ""}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (value) {
+                      setYear(value);
+                      setChoice("year");
+                    } else {
+                      choose("month");
+                    }
+                  }}
+                >
+                  <option value="">Year…</option>
+                  {years.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
         </div>
 
-        <div className="realisedHero" aria-live="polite">
-          <span className="realisedPeriodLabel">{periodLabel}</span>
-          {period.sales ? (
-            <>
-              <Amount value={period.realised} currency={currency} big />
-              <span className="muted realisedCount">
-                {plural(period.sales, "sale")}
-                {choice !== "month" && stockCount ? ` · ${plural(stockCount, "stock")}` : ""}
-              </span>
-            </>
-          ) : (
-            <span className="muted realisedNone">No sales</span>
-          )}
-        </div>
+        {nothingSold ? (
+          <p className="muted realisedNone">{noSalesLine(month)}</p>
+        ) : (
+          <>
+            <div className="realisedHero" aria-live="polite">
+              <span className="realisedPeriodLabel">{periodLabel}</span>
+              {period.sales ? (
+                <>
+                  <Amount value={period.realised} currency={currency} big />
+                  <span className="muted realisedCount">
+                    {plural(period.sales, "sale")}
+                    {choice !== "month" && stockCount ? ` · ${plural(stockCount, "stock")}` : ""}
+                  </span>
+                </>
+              ) : (
+                <span className="muted realisedNone">No sales</span>
+              )}
+            </div>
 
-        <dl className="realisedTotals">
-          <div>
-            <dt>{monthLabel}</dt>
-            <dd>
-              {m.sales ? <Amount value={m.realised} currency={currency} /> : <span className="muted">No sales</span>}
-              {m.sales ? <span className="muted realisedCount">{plural(m.sales, "sale")}</span> : null}
-            </dd>
-          </div>
-          <div>
-            <dt>{monthYear} to date</dt>
-            <dd>
-              {ytd.sales ? <Amount value={ytd.realised} currency={currency} /> : <span className="muted">No sales</span>}
-              {ytd.sales ? <span className="muted realisedCount">{plural(ytd.sales, "sale")}</span> : null}
-            </dd>
-          </div>
-        </dl>
+            <dl className="realisedTotals">
+              <div>
+                <dt>{monthLabel}</dt>
+                <dd>
+                  {m.sales ? <Amount value={m.realised} currency={currency} /> : <span className="muted">No sales</span>}
+                  {m.sales ? <span className="muted realisedCount">{plural(m.sales, "sale")}</span> : null}
+                </dd>
+              </div>
+              <div>
+                <dt>{monthYear} to date</dt>
+                <dd>
+                  {ytd.sales ? <Amount value={ytd.realised} currency={currency} /> : <span className="muted">No sales</span>}
+                  {ytd.sales ? <span className="muted realisedCount">{plural(ytd.sales, "sale")}</span> : null}
+                </dd>
+              </div>
+            </dl>
+          </>
+        )}
 
         {[...caveats(period), ...caveats(ytd)].filter((line, index, all) => all.indexOf(line) === index).map((line) => (
           <p key={line} className="realisedCaveat" role="note">{line}</p>

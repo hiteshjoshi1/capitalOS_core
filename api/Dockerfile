@@ -3,7 +3,7 @@
 #                       non-root, no pip, no test/lint tooling.
 #   dev               - adds pytest/ruff/mypy and tests/ for the `api-dev`
 #                       compose service (make test-backend / lint / typecheck).
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS base
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS base
 
 WORKDIR /app
 ENV PYTHONPATH=/app \

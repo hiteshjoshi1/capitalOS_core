@@ -24,6 +24,8 @@ import HeroMetricCard from "../components/HeroMetricCard";
 import FxNote from "../components/FxNote";
 import TrendBarChart from "../components/TrendBarChart";
 import { SavingsRateTrend, YearOverYearSection } from "../components/CashFlowYearOverYear";
+import FoldSection from "../components/FoldSection";
+import { NARROW_SHELL_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
@@ -226,11 +228,14 @@ function SplitBar({
   items,
   formatMoney,
   colors,
+  note,
 }: {
   cardTitle?: string;
   items: CashFlowBreakdownItem[];
   formatMoney: FormatMoney;
   colors?: string[];
+  /** One line under the legend saying how the split is made. */
+  note?: string;
 }) {
   const palette = colors ?? ["var(--accent)", "var(--warn)"];
   return (
@@ -254,6 +259,7 @@ function SplitBar({
               </span>
             ))}
           </div>
+          {note ? <p className="muted cashFlowSplitBarNote">{note}</p> : null}
         </>
       ) : (
         <p className="muted">No split available for this month.</p>
@@ -309,7 +315,7 @@ function DriverRows({ items, formatMoney }: { items: CashFlowCategoryDeltaItem[]
 }
 
 /** Column-bar cash bridge (starting cash -> inflows -> outflows -> transfers -> ending cash). */
-function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWaterfall; formatMoney: FormatMoney }) {
+function CashBridgeSection({ waterfall, formatMoney, fold = false }: { waterfall: CashFlowWaterfall; formatMoney: FormatMoney; fold?: boolean }) {
   const steps = [
     { label: "Starting cash", value: waterfall.starting_cash, neutral: true },
     { label: "Inflows", value: waterfall.inflows, neutral: false },
@@ -328,14 +334,18 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
   const spanText = cashBridgeSpanText(waterfall);
 
   return (
-    <section>
-      <div className="cashFlowSectionHeading">
-        <p className="wealthEyebrow">Cash bridge</p>
-        <h2 className="cashFlowSectionTitle">How your cash balance moved</h2>
-        <p className="muted">
-          Starting balance, plus what came in and out, plus transfers to other accounts, equals your ending balance.
-        </p>
-      </div>
+    <FoldSection
+      fold={fold}
+      heading={
+        <div className="cashFlowSectionHeading">
+          <p className="wealthEyebrow">Cash bridge</p>
+          <h2 className="cashFlowSectionTitle">How your cash balance moved</h2>
+          <p className="muted">
+            Starting balance, plus what came in and out, plus transfers to other accounts, equals your ending balance.
+          </p>
+        </div>
+      }
+    >
 
       <div className="card" style={{ padding: "28px 24px 20px" }}>
         {spanText ? (
@@ -373,7 +383,7 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
           </div>
         )}
       </div>
-    </section>
+    </FoldSection>
   );
 }
 
@@ -538,6 +548,9 @@ function OverviewTab({
           baseline: period.priorLabel ? `vs ${period.priorLabel}` : null,
         };
   const toDate = period.monthToDate ? " to date" : "";
+  // #474 (V21): on a phone the four blocks below the KPIs fold under their headings: net and
+  // savings rate open (they come first), the narrative and the cash bridge closed.
+  const fold = useMediaQuery(NARROW_SHELL_QUERY);
 
   return (
     <>
@@ -574,17 +587,22 @@ function OverviewTab({
         </div>
       </section>
 
-      <section>
-        <div
-          className="cashFlowSectionHeading"
-          style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}
-        >
-          <div>
-            <p className="wealthEyebrow">History</p>
-            <h2 className="cashFlowSectionTitle">Six-month net cash flow</h2>
+      <FoldSection
+        fold={fold}
+        defaultOpen
+        heading={
+          <div
+            className="cashFlowSectionHeading"
+            style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}
+          >
+            <div>
+              <p className="wealthEyebrow">History</p>
+              <h2 className="cashFlowSectionTitle">Six-month net cash flow</h2>
+            </div>
+            <span className="muted">Ending {fmt.formatMonth(detail.month)}</span>
           </div>
-          <span className="muted">Ending {fmt.formatMonth(detail.month)}</span>
-        </div>
+        }
+      >
         {detail.analytics.trend.length > 0 ? (
           <div className="card">
             <TrendBarChart
@@ -600,22 +618,26 @@ function OverviewTab({
         ) : (
           <div className="card muted">Trend data is not available yet.</div>
         )}
-      </section>
+      </FoldSection>
 
-      <SavingsRateTrend trend={detail.analytics.savings_rate_trend} month={detail.month} />
+      <SavingsRateTrend trend={detail.analytics.savings_rate_trend} month={detail.month} fold={fold} />
 
-      <section>
-        <div className="cashFlowSectionHeading">
-          <p className="wealthEyebrow">What changed</p>
-          <h2 className="cashFlowSectionTitle">Vs. last month</h2>
-        </div>
+      <FoldSection
+        fold={fold}
+        heading={
+          <div className="cashFlowSectionHeading">
+            <p className="wealthEyebrow">What changed</p>
+            <h2 className="cashFlowSectionTitle">Vs. last month</h2>
+          </div>
+        }
+      >
         <div className="card">
           <p className="cashFlowNarrative">{cashFlowNarrative(period, detail.month, detail.base_currency)}</p>
           <DriverRows items={period.deteriorationDrivers} formatMoney={formatMoney} />
         </div>
-      </section>
+      </FoldSection>
 
-      <CashBridgeSection waterfall={detail.analytics.waterfall} formatMoney={formatMoney} />
+      <CashBridgeSection waterfall={detail.analytics.waterfall} formatMoney={formatMoney} fold={fold} />
     </>
   );
 }
@@ -735,6 +757,7 @@ function ExpensesTab({
             cardTitle="Recurring vs. non-recurring"
             items={detail.analytics.outflow_recurring_split}
             formatMoney={formatMoney}
+            note="Recurring: about the same amount once a month for 3+ months, or rent, salary, insurance and the like."
           />
           <SplitBar
             cardTitle="Fixed vs. variable"

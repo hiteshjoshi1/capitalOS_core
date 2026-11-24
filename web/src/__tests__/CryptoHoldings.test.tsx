@@ -202,15 +202,15 @@ describe("CryptoHoldings route", () => {
 
     expect(await screen.findByText("Top holdings")).toBeInTheDocument();
     expect(screen.queryByText("DUST")).not.toBeInTheDocument();
-    expect(screen.getByText(/Showing 1 of 2 holdings · 1 hidden under USD 10/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 1 of 2 holdings · 1 hidden under S\$ 10/)).toBeInTheDocument();
     expect(screen.getByText(/stale\)/)).toBeInTheDocument();
     expect(screen.getByText(/refreshing/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("checkbox", { name: /Show holdings under USD 10/i }));
+    await user.click(screen.getByRole("checkbox", { name: /Show holdings under S\$ 10/i }));
     await waitFor(() => {
       expect(screen.getByText("DUST")).toBeInTheDocument();
     });
-    expect(screen.getByText(/Showing all 2 holdings, including dust under USD 10/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing all 2 holdings, including dust under S\$ 10/)).toBeInTheDocument();
   });
 
   it("shows Coinbase exchange holdings and wallet exposure from the crypto summary", async () => {
@@ -443,9 +443,64 @@ describe("CryptoHoldings races", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Unknown token")).toBeInTheDocument();
 
+    // #474 (V13): the action sits in the row's ⋯ menu.
+    await user.click(screen.getByText("⋯").closest("summary")!);
     await user.click(screen.getByRole("button", { name: "Show SOL on ethereum" }));
     await waitFor(() =>
       expect(mockApi.cryptoSetTokenVisibility).toHaveBeenCalledWith({ chain: "ethereum", contract_or_mint: SPAM, visibility: "shown" }),
+    );
+  });
+
+  it("offers Hide only in a ⋯ menu on unknown tokens, not on priced coins (#474, V13)", async () => {
+    const JUP = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
+    const SPAM = "0x2222222222222222222222222222222222222222";
+    mockApi.cryptoSummary.mockResolvedValue({
+      ...cryptoSummaryFixture,
+      hidden_token_count: 0,
+      top_holdings: [
+        { symbol: "JUP", chain: "solana", amount: 100, value_usd: 90, value_base: 120, asset_class: "CRYPTO",
+          contract_or_mint: JUP, token_key: `solana:${JUP}`, unknown_token: false, hidden: false,
+          hidden_reason: null, visibility_override: null },
+        // An unknown token the user marked "not spam": listed, and the menu can hide it again.
+        { symbol: "AIRDROP", chain: "ethereum", amount: 5, value_usd: 50, value_base: 65, asset_class: "CRYPTO",
+          contract_or_mint: SPAM, token_key: `ethereum:${SPAM}`, unknown_token: true, hidden: false,
+          hidden_reason: null, visibility_override: "shown" },
+      ],
+      chain_exposure: [],
+      wallet_exposure: [],
+      wallet_chain_exposure: [],
+    });
+    mockApi.cryptoSetTokenVisibility.mockResolvedValueOnce({ overrides: [] });
+
+    const user = userEvent.setup();
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("Top holdings")).toBeInTheDocument();
+    expect(screen.queryByLabelText("More for JUP on solana")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Hide JUP/ })).not.toBeInTheDocument();
+
+    const toggle = screen.getByLabelText("More for AIRDROP on ethereum");
+    const menu = toggle.closest("details")!;
+    expect(menu.open).toBe(false);
+    // A <summary> opens with Enter/Space in a browser (jsdom doesn't); Escape closes it.
+    await user.click(toggle);
+    expect(menu.open).toBe(true);
+    screen.getByRole("button", { name: "Hide AIRDROP on ethereum" }).focus();
+    await user.keyboard("{Escape}");
+    expect(menu.open).toBe(false);
+    expect(toggle).toHaveFocus();
+
+    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: "Hide AIRDROP on ethereum" }));
+    expect(menu.open).toBe(false);
+    await waitFor(() =>
+      expect(mockApi.cryptoSetTokenVisibility).toHaveBeenCalledWith({ chain: "ethereum", contract_or_mint: SPAM, visibility: null }),
     );
   });
 });

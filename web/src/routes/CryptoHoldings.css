@@ -27,6 +27,11 @@
   opacity: 0.6;
 }
 
-.cryptoVisibilityBtn {
-  margin-left: 8px;
+/* #474 (V13): the ⋯ menu holding the spam action; its panel opens to the left. */
+.cryptoTokenMenu {
+  margin-left: 4px;
+}
+
+.cryptoTokenMenu .inboxRefreshMenuPanel {
+  min-width: 140px;
 }

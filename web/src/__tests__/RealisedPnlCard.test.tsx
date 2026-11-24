@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import RealisedPnlCard from "../components/RealisedPnlCard";
+import { noSalesLine } from "../lib/realisedPnl";
 import { api, type RealisedPnl } from "../lib/api";
 
 vi.mock("../lib/api", () => ({ api: { realisedPnl: vi.fn() } }));
@@ -49,13 +50,37 @@ describe("RealisedPnlCard (#293)", () => {
     expect(items[1]).not.toHaveTextContent("S$ 0");
   });
 
-  it("says No sales when there were none", async () => {
+  it("says No sales in one line when nothing was sold this year (#475, V11)", async () => {
     const none = { realised: 0, sales: 0, cost_unknown: 0, fx_missing_currencies: [], sources: {} };
-    mockApi.realisedPnl.mockResolvedValue({ base_currency: "SGD", month: none, year_to_date: none, sales: [] });
-    render(<RealisedPnlCard month="2026-03" baseCurrency="SGD" />);
+    mockApi.realisedPnl.mockResolvedValue({ base_currency: "SGD", month: none, year_to_date: none, sales: [], years_with_sales: [] });
+    render(<RealisedPnlCard month="2026-12" baseCurrency="SGD" />);
     const card = await screen.findByRole("region", { name: "Realised profit and loss" });
-    expect(within(card).getAllByText("No sales")).toHaveLength(3); // the period, the month, the year
+    expect(within(card).getByText("No sales in 2026")).toBeInTheDocument();
+    expect(within(card).queryByText("No sales")).not.toBeInTheDocument(); // not three boxes
+    expect(within(card).queryByText(/to date/)).not.toBeInTheDocument();
+    // No other year to look at: no period picker either.
+    expect(within(card).queryByRole("group", { name: "Realised P&L period" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /sales/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the picker when another year had sales, and opens to the totals there", async () => {
+    const none = { realised: 0, sales: 0, cost_unknown: 0, fx_missing_currencies: [], sources: {} };
+    mockApi.realisedPnl.mockImplementation(async (_month, _base, period) =>
+      period ? year : { base_currency: "SGD", month: none, year_to_date: none, sales: [], years_with_sales: [2025] },
+    );
+    render(<RealisedPnlCard month="2026-12" baseCurrency="SGD" />);
+    expect(await screen.findByText("No sales in 2026")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Last year" }));
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(screen.queryByText("No sales in 2026")).not.toBeInTheDocument();
+  });
+
+  it("words the no-sales line by what year to date covers", () => {
+    const now = new Date(2026, 10, 24); // 24 Nov 2026
+    expect(noSalesLine("2026-11", now)).toBe("No sales in 2026");
+    expect(noSalesLine("2025-12", now)).toBe("No sales in 2025");
+    expect(noSalesLine("2026-01", now)).toBe("No sales in Jan 2026");
+    expect(noSalesLine("2026-03", now)).toBe("No sales Jan – Mar 2026");
   });
 });
 

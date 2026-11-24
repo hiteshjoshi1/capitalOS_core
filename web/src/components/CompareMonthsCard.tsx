@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import type { SpanBridge } from "../lib/api";
 import * as fmt from "../lib/format";
 import { noDataFor } from "../lib/delta";
+import { isShownBridgeLine } from "../lib/monthBridge";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import FxNote from "./FxNote";
 import LoadError from "./LoadError";
@@ -116,7 +117,7 @@ export default function CompareMonthsCard({ from, to, months, baseCurrency, onCh
                 <span className="monthBridgeAmount">{fmt.formatMoney(bridge.start.value, currency)}</span>
               </div>
             </li>
-            {bridge.lines.map((line) => (
+            {bridge.lines.filter(isShownBridgeLine).map((line) => (
               <BridgeRow key={line.key} line={line} currency={currency} />
             ))}
             <BridgeRow line={bridge.unexplained} currency={currency} muted />

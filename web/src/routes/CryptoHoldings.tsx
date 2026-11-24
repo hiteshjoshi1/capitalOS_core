@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type CryptoSummary, type TokenVisibility } from "../lib/api";
 import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
@@ -6,7 +6,9 @@ import RefreshingRegion from "../components/RefreshingRegion";
 import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent } from "../lib/format";
 import { noDataFor, noRateFor } from "../lib/delta";
 import { chartColor } from "../lib/chartColors";
+import { dustLabel, dustRule, isDust } from "../lib/cryptoDust";
 import "../App.css";
+import "./OperationsInbox.css";
 import "./CryptoHoldings.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
@@ -45,6 +47,9 @@ export default function CryptoHoldings() {
     valueBase != null && changeBase != null ? valueBase - changeBase : null;
 
   const allHoldings = useMemo(() => summary?.top_holdings ?? [], [summary?.top_holdings]);
+  // #475 (V12): the dust threshold in the page's currency ("under S$ 10"), not USD.
+  const dust = useMemo(() => dustRule(summary), [summary]);
+  const dustText = dustLabel(dust);
   const listedHoldings = useMemo(() => allHoldings.filter((h) => !h.hidden), [allHoldings]);
   const hiddenTokenCount = summary?.hidden_token_count ?? allHoldings.length - listedHoldings.length;
   // Hidden tokens show only with "Show hidden" (whatever their value); the rest follow the dust rule.
@@ -53,12 +58,12 @@ export default function CryptoHoldings() {
     [kind],
   );
   const visibleHoldings = useMemo(
-    () => allHoldings.filter((h) => kindMatches(h) && (h.hidden ? showHidden : showDust || h.value_usd >= 10)),
-    [allHoldings, showDust, showHidden, kindMatches],
+    () => allHoldings.filter((h) => kindMatches(h) && (h.hidden ? showHidden : showDust || !isDust(h, dust))),
+    [allHoldings, showDust, showHidden, kindMatches, dust],
   );
   const stablecoinCount = useMemo(() => listedHoldings.filter((h) => h.is_stablecoin).length, [listedHoldings]);
   const compareLabel = summary?.compare_month ? formatMonth(summary.compare_month, "medium") : "last month";
-  const hiddenDustCount = listedHoldings.length - listedHoldings.filter((h) => h.value_usd >= 10).length;
+  const hiddenDustCount = listedHoldings.length - listedHoldings.filter((h) => !isDust(h, dust)).length;
 
   type Holding = CryptoSummary["top_holdings"][number];
   /** "Not spam" / "Show" for a hidden token, "Hide" for a listed one (#342). Null resets to automatic. */
@@ -233,7 +238,7 @@ export default function CryptoHoldings() {
                     onChange={(e) => setShowDust(e.target.checked)}
                     style={{ marginRight: 6 }}
                   />
-                  Show holdings under USD 10
+                  Show holdings under {dustText}
                 </label>
                 {hiddenTokenCount > 0 && (
                   <button
@@ -249,8 +254,8 @@ export default function CryptoHoldings() {
             </div>
             <div className="muted stockHoldingsMeta" style={{ marginBottom: 8 }}>
               {showDust
-                ? `Showing all ${listedHoldings.length} holdings, including dust under USD 10`
-                : `Showing ${visibleHoldings.filter((h) => !h.hidden).length} of ${listedHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under USD 10` : ""}`}
+                ? `Showing all ${listedHoldings.length} holdings, including dust under ${dustText}`
+                : `Showing ${visibleHoldings.filter((h) => !h.hidden).length} of ${listedHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under ${dustText}` : ""}`}
               {hiddenTokenCount > 0 &&
                 ` · ${hiddenTokenCount} unknown or hidden token${hiddenTokenCount === 1 ? "" : "s"} (no price source, likely airdropped spam)${showHidden ? ", shown below" : ""}`}
             </div>
@@ -280,16 +285,18 @@ export default function CryptoHoldings() {
                         {h.hidden && (
                           <span className="tag">{h.hidden_reason === "user_hidden" ? "Hidden" : "Unknown token"}</span>
                         )}
-                        {h.contract_or_mint && (
-                          <button
-                            type="button"
-                            className="btn btnSmall cryptoVisibilityBtn"
+                        {/* #474 (V13): the spam action sits in a ⋯ menu, only on unknown tokens
+                            (#342's rule: never priced, not allowlisted), or on one the user already
+                            hid or un-hid, so that choice can be undone. Real coins have none. */}
+                        {h.contract_or_mint && (h.unknown_token || h.hidden || h.visibility_override != null) && (
+                          <TokenVisibilityMenu
+                            symbol={h.symbol}
+                            chain={h.chain}
+                            actionLabel={h.hidden ? (h.hidden_reason === "user_hidden" ? "Show" : "Not spam") : "Hide"}
+                            showing={Boolean(h.hidden)}
                             disabled={savingToken === (h.token_key ?? h.contract_or_mint)}
-                            onClick={() => void changeVisibility(h)}
-                            aria-label={`${h.hidden ? "Show" : "Hide"} ${h.symbol} on ${h.chain}`}
-                          >
-                            {h.hidden ? (h.hidden_reason === "user_hidden" ? "Show" : "Not spam") : "Hide"}
-                          </button>
+                            onSelect={() => void changeVisibility(h)}
+                          />
                         )}
                       </span>
                       <span className="listRowMeta">
@@ -327,5 +334,62 @@ export default function CryptoHoldings() {
         </RefreshingRegion>
       )}
     </PageShell>
+  );
+}
+
+/** A token row's ⋯ menu (#474, V13): one action, "Hide" / "Not spam" / "Show" (#342). A
+ *  <details> so it opens with Enter or Space; Escape or a tap outside closes it. */
+function TokenVisibilityMenu({ symbol, chain, actionLabel, showing, disabled, onSelect }: {
+  symbol: string;
+  chain: string;
+  actionLabel: string;
+  /** The action shows the token (it is hidden now). */
+  showing: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  const menuRef = useRef<HTMLDetailsElement | null>(null);
+  const summaryRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const onPointer = (event: PointerEvent) => {
+      const menu = menuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, []);
+  const close = () => {
+    if (menuRef.current) menuRef.current.open = false;
+  };
+  return (
+    <details
+      className="inboxRefreshMenu cryptoTokenMenu"
+      ref={menuRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && menuRef.current?.open) {
+          event.stopPropagation();
+          close();
+          summaryRef.current?.focus();
+        }
+      }}
+    >
+      <summary ref={summaryRef} className="btn btnSmall inboxRefreshMenuToggle" aria-label={`More for ${symbol} on ${chain}`}>
+        <span aria-hidden="true">⋯</span>
+      </summary>
+      <div className="inboxRefreshMenuPanel" role="group" aria-label={`Options for ${symbol} on ${chain}`}>
+        <button
+          type="button"
+          className="inboxRefreshMenuItem"
+          disabled={disabled}
+          aria-label={`${showing ? "Show" : "Hide"} ${symbol} on ${chain}`}
+          onClick={() => {
+            close();
+            onSelect();
+          }}
+        >
+          {actionLabel}
+        </button>
+      </div>
+    </details>
   );
 }

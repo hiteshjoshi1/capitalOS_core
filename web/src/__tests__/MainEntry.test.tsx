@@ -22,7 +22,6 @@ vi.mock("../routes/CashOverview.tsx", () => ({ default: () => null }));
 vi.mock("../routes/MarketData.tsx", () => ({ default: () => null }));
 vi.mock("../routes/CashFlowDetail.tsx", () => ({ default: () => null }));
 vi.mock("../routes/CashFlowMapping.tsx", () => ({ default: () => null }));
-vi.mock("../routes/Alerts.tsx", () => ({ default: () => null }));
 vi.mock("../routes/WealthOverview.tsx", () => ({ default: () => null }));
 vi.mock("../routes/WealthRisk.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Dividends.tsx", () => ({ default: () => null }));

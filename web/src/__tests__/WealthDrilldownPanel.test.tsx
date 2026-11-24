@@ -238,7 +238,7 @@ describe("WealthDrilldownPanel focus", () => {
       move_causes: { change: 100, change_pct: 2, is_big_move: false, causes: [], none_reason: null },
     } as never);
     renderPanel({ month: "2026-07", flags: { ...baseFlags, isCatchUp: true } });
-    expect(await screen.findByText("No data cause found: a market move")).toBeInTheDocument();
+    expect(await screen.findByText("Mostly market moves; no new statement or account explains it.")).toBeInTheDocument();
   });
 
   it("doesn't fetch causes for an unflagged month (#289)", () => {

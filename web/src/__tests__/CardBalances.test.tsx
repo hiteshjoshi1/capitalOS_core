@@ -95,23 +95,91 @@ describe("CardBalances (#300)", () => {
     expect(differenceReason(period(), "SGD")).toBeNull();
   });
 
-  it("lets a card with no statement balance get one typed in", async () => {
+  it("types statement balances for every card on one Update balances sheet (#472)", async () => {
     const estimate = card({ method: "transactions", last_balance_date: null, last_balance: null, periods: [], paid_in_full: null });
-    mockApi.creditCardBalances.mockResolvedValueOnce(payload([estimate])).mockResolvedValue(payload([card()]));
-    mockApi.setCreditCardBalance.mockResolvedValue(payload([card()]));
+    const second = card({ account_id: 2, account_name: "Other Card", card_name: "Other Card", issuer: "DBS" });
+    const third = card({ account_id: 3, account_name: "Third Card", card_name: "Third Card", issuer: "Citi", currency: "USD" });
+    mockApi.creditCardBalances.mockResolvedValueOnce(payload([estimate, second, third])).mockResolvedValue(payload([card(), second, third]));
+    mockApi.setCreditCardBalance.mockResolvedValue(payload([card(), second, third]));
     render(<CardBalances baseCurrency="SGD" />);
-    expect(await screen.findByText(/No statement balance on file/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Statement date"), { target: { value: "2026-10-13" } });
-    fireEvent.change(screen.getByLabelText("Amount owed (SGD)"), { target: { value: "524.21" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save balance" }));
-    await waitFor(() =>
-      expect(mockApi.setCreditCardBalance).toHaveBeenCalledWith(
-        1,
-        { as_of_date: "2026-10-13", owed: 524.21, due_date: null, minimum_due: null },
-        "SGD",
-      ),
+    // No form under each card: a line that points at the one sheet.
+    expect(await screen.findByText(/No statement balance on file: this month/)).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Update balances" })).toBeNull();
+    expect(screen.queryByLabelText("Statement date")).toBeNull();
+
+    const open = screen.getByRole("button", { name: "Update balances" });
+    expect(open).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(open);
+    expect(open).toHaveAttribute("aria-expanded", "true");
+    const sheet = screen.getByRole("form", { name: "Update balances" });
+    expect(open).toHaveAttribute("aria-controls", sheet.id);
+    // Every card is listed, with the statement it has now.
+    const first = within(sheet).getByRole("group", { name: "Synthetic Card" });
+    const other = within(sheet).getByRole("group", { name: "Other Card" });
+    expect(within(sheet).getByRole("group", { name: "Third Card" })).toBeInTheDocument();
+    expect(within(first).getByText("No statement balance on file")).toBeInTheDocument();
+    expect(within(other).getByText("Statement of 13 Oct 2026: S$ 524.21")).toBeInTheDocument();
+
+    fireEvent.change(within(first).getByLabelText("Statement date"), { target: { value: "2026-10-13" } });
+    fireEvent.change(within(first).getByLabelText("Amount owed (SGD)"), { target: { value: "524.21" } });
+    fireEvent.change(within(other).getByLabelText("Statement date"), { target: { value: "2026-11-02" } });
+    fireEvent.change(within(other).getByLabelText("Amount owed (SGD)"), { target: { value: "1,200" } });
+    fireEvent.change(within(other).getByLabelText("Payment due date (optional)"), { target: { value: "2026-11-25" } });
+    fireEvent.change(within(other).getByLabelText("Minimum payment (SGD, optional)"), { target: { value: "50" } });
+    // The third card is left empty: not saved.
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save balances" }));
+
+    await waitFor(() => expect(screen.queryByRole("form", { name: "Update balances" })).toBeNull());
+    expect(mockApi.setCreditCardBalance).toHaveBeenCalledTimes(2);
+    expect(mockApi.setCreditCardBalance).toHaveBeenCalledWith(
+      1,
+      { as_of_date: "2026-10-13", owed: 524.21, due_date: null, minimum_due: null },
+      "SGD",
     );
-    expect(await screen.findByText("Owes S$ 674.98")).toBeInTheDocument();
+    expect(mockApi.setCreditCardBalance).toHaveBeenCalledWith(
+      2,
+      { as_of_date: "2026-11-02", owed: 1200, due_date: "2026-11-25", minimum_due: 50 },
+      "SGD",
+    );
+    expect(await screen.findAllByText("Owes S$ 674.98")).toHaveLength(2);
+  });
+
+  it("says what a half-filled card is missing and saves nothing (#472)", async () => {
+    mockApi.creditCardBalances.mockResolvedValue(payload([card()]));
+    render(<CardBalances baseCurrency="SGD" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update balances" }));
+    const sheet = screen.getByRole("form", { name: "Update balances" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save balances" }));
+    expect(within(sheet).getByRole("alert")).toHaveTextContent("Fill in at least one card's statement date and amount owed.");
+    fireEvent.change(within(sheet).getByLabelText("Amount owed (SGD)"), { target: { value: "100" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save balances" }));
+    expect(within(sheet).getByRole("alert")).toHaveTextContent("Enter the statement date and the amount it says you owe.");
+    expect(mockApi.setCreditCardBalance).not.toHaveBeenCalled();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("form", { name: "Update balances" })).toBeNull();
+  });
+
+  it("keeps a card the API refused on the sheet, with its reason (#472)", async () => {
+    const second = card({ account_id: 2, account_name: "Other Card", card_name: "Other Card" });
+    mockApi.creditCardBalances.mockResolvedValue(payload([card(), second]));
+    mockApi.setCreditCardBalance
+      .mockResolvedValueOnce(payload([card(), second]))
+      .mockRejectedValueOnce(new Error("The statement date can't be in the future"));
+    render(<CardBalances baseCurrency="SGD" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update balances" }));
+    const sheet = screen.getByRole("form", { name: "Update balances" });
+    for (const [name, day] of [["Synthetic Card", "2026-10-13"], ["Other Card", "2099-01-01"]]) {
+      const group = within(sheet).getByRole("group", { name });
+      fireEvent.change(within(group).getByLabelText("Statement date"), { target: { value: day } });
+      fireEvent.change(within(group).getByLabelText("Amount owed (SGD)"), { target: { value: "10" } });
+    }
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save balances" }));
+    const other = within(sheet).getByRole("group", { name: "Other Card" });
+    expect(await within(other).findByRole("alert")).toHaveTextContent("The statement date can't be in the future");
+    // The saved card's entry is cleared; the refused one keeps what was typed.
+    expect(within(within(sheet).getByRole("group", { name: "Synthetic Card" })).getByLabelText("Statement date")).toHaveValue("");
+    expect(within(other).getByLabelText("Statement date")).toHaveValue("2099-01-01");
+    expect(mockApi.creditCardBalances).toHaveBeenCalledTimes(2);
   });
 
   it("says a due date is unknown and lets one be typed in from the statement (#352)", async () => {

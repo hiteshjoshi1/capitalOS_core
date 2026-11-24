@@ -1332,12 +1332,6 @@ def month_bridge(
     cash_fx = _cash_fx(db, current_user_id, base_currency, start_anchor, end_anchor)
     flows = _flows(db, current_user_id, base_currency, start_anchor, end_anchor, ledger_accounts)
 
-    # Brokers whose money in and out isn't recorded anywhere.
-    no_cash_record = sorted(
-        {_platform_label(h.platform) for h in (*stocks0.values(), *stocks1.values())
-         if h.account_id is None or h.account_id not in cash_accounts}
-    )
-
     period = "month to date" if is_live else "this month"
     lines: list[Dict[str, Any]] = []
 
@@ -1351,15 +1345,19 @@ def month_bridge(
             f"{flows.internal_count} transfer(s) from your own accounts to a broker: not new money",
             flows.internal_moves,
         ))
+    # #475 (V9): "partial" only when an estimate is in the figure (a broker with no cash record
+    # bought or sold). A broker with no cash record whose holdings didn't change has nothing to
+    # estimate, so a month without trades there isn't partial (it used to be, every month).
+    estimated = sorted({_platform_label(p) for p in broker_trades})
     lines.append(_line(
         "new_money",
         "New money in",
         new_money,
-        status="partial" if no_cash_record else "ok",
+        status="partial" if estimated else "ok",
         reason=(
-            f"No cash record for {', '.join(no_cash_record)}: their buys and sales are estimated from the change "
+            f"No cash record for {', '.join(estimated)}: their buys and sales are estimated from the change "
             "in holdings at this period's prices, less transfers from your own accounts"
-            if no_cash_record else None
+            if estimated else None
         ),
         parts=[
             _part("deposits", "Deposits", flows.new_money_in),

@@ -9,8 +9,8 @@
  * - **Stale-while-revalidate.** A cached key renders at once and is refetched on mount
  *   (`staleTimeMs`, default 0, so a page never shows numbers older than the last visit
  *   without asking the server again).
- * - **Dedupe.** Two components mounting the same key share one request (e.g. the sidebar
- *   and the Alerts page both reading `/alerts/notifications`).
+ * - **Dedupe.** Two components mounting the same key share one request (e.g. the header
+ *   bell and Overview's "since your last visit" strip both reading `/operations/inbox`).
  * - **Abort.** When the last component using a key goes away (unmount, or its key changed)
  *   the in-flight request is aborted. The fetcher runs inside `withAbortSignal`, so every
  *   `api.*` call it starts synchronously carries the signal.
